@@ -15,6 +15,9 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.lytefast.flexinput.R
 
+private const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
+private const val WRAP_CONTENT = ViewGroup.LayoutParams.WRAP_CONTENT
+
 class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
     override fun onViewBound(view: View?) {
@@ -121,7 +124,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             addView(TextView(context).apply {
                 this.text = text
                 setTextColor(textColor)
-                textAlignment = TEXT_ALIGNMENT_CENTER
+                textAlignment = View.TEXT_ALIGNMENT_CENTER
             })
         }
 

@@ -71,7 +71,7 @@ class TranslateController(
             val fbResult = fallback.translate(cleanedText, sourceLang, target)
             if (fbResult is TranslateResult.Success) {
                 result = fbResult
-                Utils.mainThread {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
                     onShowToast("已降级到 Google Translate", false)
                 }
             }
@@ -98,7 +98,7 @@ class TranslateController(
     ) {
         Utils.threadPool.execute {
             val result = translateSync(text, sourceLang, targetLang, channelId, messageId)
-            Utils.mainThread {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (result is TranslateResult.Success) {
                     rerender(messageId)
                 }
@@ -154,7 +154,9 @@ class TranslateController(
 
     private fun rerender(messageId: Long) {
         chatList?.let { list ->
-            Utils.mainThread { list.forceRerenderMessage(messageId) }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                list.forceRerenderMessage(messageId)
+            }
         }
     }
 }

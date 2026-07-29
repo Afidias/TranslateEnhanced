@@ -84,12 +84,10 @@ class Translate : Plugin() {
                 // 异步读取消息并翻译
                 Utils.threadPool.execute {
                     try {
-                        val message = com.aliucord.wrappers.messages.Message(
-                            com.discord.stores.StoreStream
-                                .getMessages()
-                                .getMessage(channelId, messageId)
-                        )
-                        val content = message.content ?: return@execute
+                        val message = com.discord.stores.StoreStream
+                            .getMessages()
+                            .getMessage(channelId, messageId)
+                        val content = message?.content ?: return@execute
                         if (content.isBlank()) return@execute
 
                         val targetLang = settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
@@ -107,14 +105,16 @@ class Translate : Plugin() {
                         when (result) {
                             is TranslateResult.Success -> {
                                 autoManager.recordSuccess(channelId)
-                                Utils.mainThread { chatList?.let { list ->
-                                    list.forceRerenderMessage(messageId)
-                                }}
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    chatList?.let { list ->
+                                        list.forceRerenderMessage(messageId)
+                                    }
+                                }
                             }
                             is TranslateResult.Error -> {
                                 val justPaused = autoManager.recordFailure(channelId)
                                 if (justPaused) {
-                                    Utils.mainThread {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
                                         Utils.showToast(strings.toastAutoPaused, true)
                                     }
                                 }
@@ -163,7 +163,7 @@ class Translate : Plugin() {
                     ?: return@Hook
                 val ctx = textView.context
 
-                applyTranslatedText(builder, data, ctx)
+                builder.applyTranslatedText(data, ctx)
                 textView.setDraweeSpanStringBuilder(builder)
             }
         )
