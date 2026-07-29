@@ -210,11 +210,11 @@ class Translate : Plugin() {
                             channelId = message.channelId,
                             messageId = message.id
                         )
-                        Utils.mainThread { menu.dismiss() }
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { menu.dismiss() }
                     } else {
                         // 切换原文/译文
                         controller.toggleOriginal(message.id)
-                        Utils.mainThread { menu.dismiss() }
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { menu.dismiss() }
                     }
                 }
             }
@@ -258,7 +258,7 @@ class Translate : Plugin() {
                             Utils.showToast(
                                 if (nowOn) strings.toastAutoResumed else strings.toastAutoPaused
                             )
-                            menu.dismiss()
+                            (hookParam.thisObject as WidgetChatListActions).dismiss()
                         }
                         setCompoundDrawablesRelativeWithIntrinsicBounds(pluginIcon, null, null, null)
                     })

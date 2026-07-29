@@ -49,8 +49,7 @@ class LLMTranslator(
                 setHeader("Content-Type", "application/json")
                 setHeader("Authorization", "Bearer $apiKey")
                 setHeader("User-Agent", USER_AGENT)
-                setBody(requestBody.toString())
-            }.execute()
+            }.executeWithBody(requestBody.toString())
 
             if (!response.ok()) {
                 return TranslateResult.Error(
