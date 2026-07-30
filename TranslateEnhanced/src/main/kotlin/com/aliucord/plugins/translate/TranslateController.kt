@@ -101,6 +101,11 @@ class TranslateController(
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (result is TranslateResult.Success) {
                     rerender(messageId)
+                } else {
+                    // 翻译失败：清除加载占位符，恢复原文显示
+                    translatedMessages.remove(messageId)
+                    rerender(messageId)
+                    onShowToast("翻译失败: ${(result as TranslateResult.Error).errorText}", false)
                 }
                 onComplete?.invoke(result)
             }
