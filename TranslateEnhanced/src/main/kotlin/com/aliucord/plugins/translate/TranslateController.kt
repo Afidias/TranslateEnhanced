@@ -154,14 +154,16 @@ class TranslateController(
     private fun resolveBackend(): TranslatorBackend {
         val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
         return if (choice == "llm") {
+            // 直接传 getString() 原始返回值给 LLMTranslator
+            // LLMTranslator 用 Any 接收 + String.format 转换，R8 无法优化
             LLMTranslator(
-                baseUrl  = settings.safeGetString(SETTINGS_KEY_LLM_BASE_URL),
-                apiKey   = settings.safeGetString(SETTINGS_KEY_LLM_API_KEY),
-                model    = settings.safeGetString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini"),
-                systemPrompt = settings.safeGetString(
+                baseUrl  = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "") as Any,
+                apiKey   = settings.getString(SETTINGS_KEY_LLM_API_KEY, "") as Any,
+                model    = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini") as Any,
+                systemPrompt = settings.getString(
                     SETTINGS_KEY_LLM_SYSTEM_PROMPT,
                     LLMTranslator.DEFAULT_SYSTEM_PROMPT
-                )
+                ) as Any
             )
         } else {
             GoogleTranslator()
