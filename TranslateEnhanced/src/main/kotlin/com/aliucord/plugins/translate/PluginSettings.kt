@@ -124,20 +124,17 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
     /**
      * 测试 LLM 连接
+     * 注意：不调用任何 String 方法（isBlank, isEmpty 等），
+     * 因为 settings.getString() 返回混淆类型，String 方法会崩溃。
+     * 直接传给 LLMApiHelper，由它用 String.format 转换。
      */
     private fun testLLMConnection(strings: IStrings) {
-        val baseUrl = safeGetStr(SETTINGS_KEY_LLM_BASE_URL)
-        val apiKey = safeGetStr(SETTINGS_KEY_LLM_API_KEY)
-        val model = safeGetStr(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini")
-
-        if (baseUrl.isBlank() || apiKey.isBlank()) {
-            Utils.showToast("Please fill in Base URL and API Key first")
-            return
-        }
+        val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")
+        val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "")
+        val model = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini")
 
         Utils.showToast(strings.settingsTesting)
 
-        // 在后台线程执行测试
         Thread {
             try {
                 val result = LLMApiHelper.testConnection(baseUrl, apiKey, model)
@@ -163,17 +160,11 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
      * 获取可用模型列表
      */
     private fun fetchAvailableModels(strings: IStrings) {
-        val baseUrl = safeGetStr(SETTINGS_KEY_LLM_BASE_URL)
-        val apiKey = safeGetStr(SETTINGS_KEY_LLM_API_KEY)
-
-        if (baseUrl.isBlank() || apiKey.isBlank()) {
-            Utils.showToast("Please fill in Base URL and API Key first")
-            return
-        }
+        val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")
+        val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "")
 
         Utils.showToast(strings.settingsFetchingModels)
 
-        // 在后台线程执行获取
         Thread {
             try {
                 val result = LLMApiHelper.fetchModels(baseUrl, apiKey)

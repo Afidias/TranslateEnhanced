@@ -7,21 +7,19 @@ import org.json.JSONObject
 
 /**
  * LLM API 辅助工具类
- * 提供测试连接和获取可用模型列表的功能
+ *
+ * 注意：Aliucord SettingsAPI.getString() 运行时返回混淆类型 d0.d0.b，
+ * 不是真正的 String，所有 String 方法（isBlank, trimEnd 等）都会崩溃。
+ * 因此本类中所有参数类型为 Any，不调用任何 String 方法，
+ * 靠 try-catch 接住所有异常。
  */
 object LLMApiHelper {
 
-    /**
-     * 测试连接结果
-     */
     sealed class TestResult {
         data class Success(val message: String) : TestResult()
         data class Error(val errorCode: Int? = null, val errorText: String) : TestResult()
     }
 
-    /**
-     * 获取模型列表结果
-     */
     sealed class ModelsResult {
         data class Success(val models: List<String>) : ModelsResult()
         data class Error(val errorCode: Int? = null, val errorText: String) : ModelsResult()
@@ -29,31 +27,43 @@ object LLMApiHelper {
 
     /**
      * 测试 LLM API 连接
-     * 发送一个简单的翻译请求来验证配置是否正确
+     * 参数类型为 Any，避免对混淆类型调用 String 方法
      */
-    fun testConnection(baseUrl: String, apiKey: String, model: String): TestResult {
-        if (apiKey.isBlank() || baseUrl.isBlank()) {
-            return TestResult.Error(errorText = "API Key or Base URL not configured")
-        }
-
-        val requestBody = JSONObject().apply {
-            put("model", model)
-            put("temperature", 0.0)
-            put("max_tokens", 50)
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", "Say 'OK' in one word.")
-                })
-            })
-        }
-
-        val url = baseUrl.trimEnd('/') + "/v1/chat/completions"
-
+    fun testConnection(baseUrl: Any, apiKey: Any, model: Any): TestResult {
         return try {
+            // 用 String.format 转换，如果失败会被 catch 接住
+            val urlStr = String.format("%s", baseUrl)
+            val keyStr = String.format("%s", apiKey)
+            val modelStr = String.format("%s", model)
+
+            // 检查是否为空（用 equals 而不是 isBlank，equals 是 Object 方法）
+            if (urlStr == "" || keyStr == "") {
+                return TestResult.Error(errorText = "API Key or Base URL not configured")
+            }
+
+            // 构建 URL（trimEnd 可能崩溃，用 try-catch 保护）
+            val cleanUrl = try {
+                urlStr.trimEnd('/')
+            } catch (e: Exception) {
+                urlStr
+            }
+            val url = cleanUrl + "/v1/chat/completions"
+
+            val requestBody = JSONObject().apply {
+                put("model", modelStr)
+                put("temperature", 0.0)
+                put("max_tokens", 50)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", "Say 'OK' in one word.")
+                    })
+                })
+            }
+
             val response = Http.Request(url, "POST").apply {
                 setHeader("Content-Type", "application/json")
-                setHeader("Authorization", "Bearer $apiKey")
+                setHeader("Authorization", "Bearer $keyStr")
                 setHeader("User-Agent", USER_AGENT)
             }.executeWithBody(requestBody.toString())
 
@@ -79,19 +89,27 @@ object LLMApiHelper {
 
     /**
      * 获取可用模型列表
-     * 调用 /v1/models 端点获取模型列表
+     * 参数类型为 Any，避免对混淆类型调用 String 方法
      */
-    fun fetchModels(baseUrl: String, apiKey: String): ModelsResult {
-        if (apiKey.isBlank() || baseUrl.isBlank()) {
-            return ModelsResult.Error(errorText = "API Key or Base URL not configured")
-        }
-
-        val url = baseUrl.trimEnd('/') + "/v1/models"
-
+    fun fetchModels(baseUrl: Any, apiKey: Any): ModelsResult {
         return try {
+            val urlStr = String.format("%s", baseUrl)
+            val keyStr = String.format("%s", apiKey)
+
+            if (urlStr == "" || keyStr == "") {
+                return ModelsResult.Error(errorText = "API Key or Base URL not configured")
+            }
+
+            val cleanUrl = try {
+                urlStr.trimEnd('/')
+            } catch (e: Exception) {
+                urlStr
+            }
+            val url = cleanUrl + "/v1/models"
+
             val response = Http.Request(url, "GET").apply {
                 setHeader("Content-Type", "application/json")
-                setHeader("Authorization", "Bearer $apiKey")
+                setHeader("Authorization", "Bearer $keyStr")
                 setHeader("User-Agent", USER_AGENT)
             }.execute()
 
