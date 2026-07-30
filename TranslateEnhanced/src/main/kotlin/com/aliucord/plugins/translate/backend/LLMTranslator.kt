@@ -42,7 +42,7 @@ class LLMTranslator(
             })
         }
 
-        val url = baseUrl.trimEnd('/') + "/v1/chat/completions"
+        val url = buildUrl(baseUrl, "chat/completions")
 
         return try {
             val response = Http.Request(url, "POST").apply {
@@ -87,5 +87,21 @@ class LLMTranslator(
         const val DEFAULT_SYSTEM_PROMPT =
             "You are a professional translator. " +
             "Only output the translated text, no explanations."
+
+        /**
+         * 构建 API URL
+         * 自动处理 Base URL 是否带 /v1 的情况：
+         *   https://api.openai.com       → https://api.openai.com/v1/chat/completions
+         *   https://api.openai.com/v1    → https://api.openai.com/v1/chat/completions
+         *   https://api.openai.com/v1/   → https://api.openai.com/v1/chat/completions
+         */
+        fun buildUrl(baseUrl: String, path: String): String {
+            var base = baseUrl.trimEnd('/')
+            // 如果已经以 /v1 结尾，不再重复添加
+            if (!base.endsWith("/v1")) {
+                base += "/v1"
+            }
+            return "$base/$path"
+        }
     }
 }

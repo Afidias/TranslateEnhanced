@@ -47,7 +47,9 @@ object LLMApiHelper {
             } catch (e: Exception) {
                 urlStr
             }
-            val url = cleanUrl + "/v1/chat/completions"
+            // 自动处理是否带 /v1：https://api.openai.com 或 https://api.openai.com/v1 都能正确拼接
+            val base = if (cleanUrl.endsWith("/v1")) cleanUrl else "$cleanUrl/v1"
+            val url = "$base/chat/completions"
 
             val requestBody = JSONObject().apply {
                 put("model", modelStr)
@@ -105,7 +107,8 @@ object LLMApiHelper {
             } catch (e: Exception) {
                 urlStr
             }
-            val url = cleanUrl + "/v1/models"
+            val base = if (cleanUrl.endsWith("/v1")) cleanUrl else "$cleanUrl/v1"
+            val url = "$base/models"
 
             val response = Http.Request(url, "GET").apply {
                 setHeader("Content-Type", "application/json")
