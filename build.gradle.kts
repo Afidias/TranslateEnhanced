@@ -35,7 +35,6 @@ subprojects {
 
     aliucord {
         author("TranslateEnhanced", 0L)
-        version.set("1.0.0")
         updateUrl.set("https://raw.githubusercontent.com/${System.getenv("GITHUB_REPOSITORY") ?: "owner/repo"}/builds/updater.json")
         buildUrl.set("https://raw.githubusercontent.com/${System.getenv("GITHUB_REPOSITORY") ?: "owner/repo"}/builds/%s.zip")
         minimumDiscordVersion.set(126021)
