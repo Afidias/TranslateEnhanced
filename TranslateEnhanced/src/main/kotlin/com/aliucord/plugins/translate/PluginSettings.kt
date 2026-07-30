@@ -35,7 +35,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         addView(sectionLabel(strings.settingsBackendLabel, textColor))
 
         val backendGoogle = switchRow(strings.settingsBackendGoogle, textColor).apply {
-            isChecked = settings.getString(SETTINGS_KEY_BACKEND, "google") == "google"
+            isChecked = settings.getString(SETTINGS_KEY_BACKEND, "google").toString() == "google"
             setOnCheckedChangeListener { _, checked ->
                 settings.setString(SETTINGS_KEY_BACKEND, if (checked) "google" else "llm")
                 refreshUI()
@@ -71,7 +71,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
         llmSection.addView(buttonRow)
 
-        val isLLM = settings.getString(SETTINGS_KEY_BACKEND, "google") == "llm"
+        val isLLM = settings.getString(SETTINGS_KEY_BACKEND, "google").toString() == "llm"
         llmSection.visibility = if (isLLM) View.VISIBLE else View.GONE
         addView(llmSection)
 
@@ -83,8 +83,8 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         // ── Default language ──────────────────────────────────────
         addView(sectionLabel(strings.settingsDefaultLanguage, textColor))
 
-        val currentLang = languageCodes.entries.firstOrNull { it.value == settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
-            ?: settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+        val currentLang = languageCodes.entries.firstOrNull { it.value == settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG).toString() }?.key
+            ?: settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG).toString()
         addView(cardRow("Default: $currentLang", textColor, bgColor))
 
         addView(sectionLabel(strings.settingsSupportedLanguages, textColor))
@@ -119,9 +119,9 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
      * 测试 LLM 连接
      */
     private fun testLLMConnection(strings: IStrings) {
-        val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")
-        val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "")
-        val model = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini")
+        val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "").toString()
+        val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "").toString()
+        val model = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini").toString()
 
         if (baseUrl.isBlank() || apiKey.isBlank()) {
             Utils.showToast("Please fill in Base URL and API Key first")
@@ -156,8 +156,8 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
      * 获取可用模型列表
      */
     private fun fetchAvailableModels(strings: IStrings) {
-        val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")
-        val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "")
+        val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "").toString()
+        val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "").toString()
 
         if (baseUrl.isBlank() || apiKey.isBlank()) {
             Utils.showToast("Please fill in Base URL and API Key first")
@@ -194,7 +194,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
     private fun showModelSelectionDialog(models: List<String>, strings: IStrings) {
         try {
             val ctx = requireContext()
-            val currentModel = settings.getString(SETTINGS_KEY_LLM_MODEL, "")
+            val currentModel = settings.getString(SETTINGS_KEY_LLM_MODEL, "").toString()
 
             // 创建对话框
             com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
@@ -262,7 +262,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             setPadding(0, 12, 0, 12)
             this.hint = hint
             addView(TextInputEditText(context).apply {
-                setText(settings.getString(key, ""))
+                setText(settings.getString(key, "").toString())
                 setTextColor(textColor)
                 if (isPassword) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
                 setOnFocusChangeListener { _, hasFocus ->
