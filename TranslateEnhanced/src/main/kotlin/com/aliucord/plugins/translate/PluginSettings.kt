@@ -131,19 +131,25 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         Utils.showToast(strings.settingsTesting)
 
         // 在后台线程执行测试
-        Utils.threadPool.execute {
-            val result = LLMApiHelper.testConnection(baseUrl, apiKey, model)
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                when (result) {
-                    is LLMApiHelper.TestResult.Success -> {
-                        Utils.showToast(strings.settingsTestSuccess)
-                    }
-                    is LLMApiHelper.TestResult.Error -> {
-                        Utils.showToast(strings.settingsTestFailed + result.errorText)
+        Thread {
+            try {
+                val result = LLMApiHelper.testConnection(baseUrl, apiKey, model)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    when (result) {
+                        is LLMApiHelper.TestResult.Success -> {
+                            Utils.showToast(strings.settingsTestSuccess)
+                        }
+                        is LLMApiHelper.TestResult.Error -> {
+                            Utils.showToast(strings.settingsTestFailed + result.errorText)
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Utils.showToast("Test failed: ${e.message}")
+                }
             }
-        }
+        }.start()
     }
 
     /**
@@ -161,40 +167,54 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         Utils.showToast(strings.settingsFetchingModels)
 
         // 在后台线程执行获取
-        Utils.threadPool.execute {
-            val result = LLMApiHelper.fetchModels(baseUrl, apiKey)
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                when (result) {
-                    is LLMApiHelper.ModelsResult.Success -> {
-                        showModelSelectionDialog(result.models, strings)
-                    }
-                    is LLMApiHelper.ModelsResult.Error -> {
-                        Utils.showToast(strings.settingsTestFailed + result.errorText)
+        Thread {
+            try {
+                val result = LLMApiHelper.fetchModels(baseUrl, apiKey)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    when (result) {
+                        is LLMApiHelper.ModelsResult.Success -> {
+                            showModelSelectionDialog(result.models, strings)
+                        }
+                        is LLMApiHelper.ModelsResult.Error -> {
+                            Utils.showToast(strings.settingsTestFailed + result.errorText)
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Utils.showToast("Failed to fetch models: ${e.message}")
+                }
             }
-        }
+        }.start()
     }
 
     /**
      * 显示模型选择对话框
      */
     private fun showModelSelectionDialog(models: List<String>, strings: IStrings) {
-        val ctx = requireContext()
-        val currentModel = settings.getString(SETTINGS_KEY_LLM_MODEL, "")
+        try {
+            val ctx = requireContext()
+            val currentModel = settings.getString(SETTINGS_KEY_LLM_MODEL, "")
 
-        // 创建对话框
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
-            .setTitle(strings.settingsSelectModel)
-            .setItems(models.toTypedArray()) { _, which ->
-                val selectedModel = models[which]
-                settings.setString(SETTINGS_KEY_LLM_MODEL, selectedModel)
-                Utils.showToast("Model set to: $selectedModel")
-                // 刷新页面以显示新选择的模型
-                onViewBound(view)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+            // 创建对话框
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                .setTitle(strings.settingsSelectModel)
+                .setItems(models.toTypedArray()) { _, which ->
+                    val selectedModel = models[which]
+                    settings.setString(SETTINGS_KEY_LLM_MODEL, selectedModel)
+                    Utils.showToast("Model set to: $selectedModel")
+                    // 刷新页面以显示新选择的模型
+                    try {
+                        onViewBound(null)
+                    } catch (e: Exception) {
+                        // 忽略刷新错误
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } catch (e: Exception) {
+            Utils.showToast("Failed to show dialog: ${e.message}")
+        }
     }
 
     private fun refreshUI() { /* UI refreshes via the listener callbacks above */ }
