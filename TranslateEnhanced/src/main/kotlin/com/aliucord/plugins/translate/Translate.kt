@@ -19,6 +19,7 @@ import com.aliucord.plugins.translate.auto.AutoTranslateManager
 import com.aliucord.plugins.translate.auto.LanguageDetector
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.getStrings
+import com.aliucord.plugins.translate.utils.safeGetString
 import com.discord.api.commands.ApplicationCommandType
 import com.discord.databinding.WidgetChatListActionsBinding
 import com.discord.utilities.textprocessing.node.EditedMessageNode
@@ -90,7 +91,7 @@ class Translate : Plugin() {
                         val content = message?.content ?: return@execute
                         if (content.isBlank()) return@execute
 
-                        val targetLang = "${settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)}"
+                        val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
                         // 语言检测：跳过目标语言的消息
                         if (!LanguageDetector.shouldTranslate(content, targetLang)) return@execute

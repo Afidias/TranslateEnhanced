@@ -11,6 +11,7 @@ import com.aliucord.fragments.SettingsPage
 import com.aliucord.plugins.translate.backend.LLMApiHelper
 import com.aliucord.plugins.translate.strings.IStrings
 import com.aliucord.plugins.translate.utils.getStrings
+import com.aliucord.plugins.translate.utils.safeGetString
 import com.discord.utilities.color.ColorCompat
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
@@ -116,16 +117,10 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
     }
 
     /**
-     * 安全读取 String 设置项
-     * Aliucord SettingsAPI 可能返回混淆类型，需要通过字符串模板强制转换
+     * 安全读取 String 设置项（使用扩展函数 safeGetString）
      */
-    private fun safeGetStr(key: String, default: String = ""): String {
-        return try {
-            "${settings.getString(key, default)}"
-        } catch (e: Exception) {
-            default
-        }
-    }
+    private fun safeGetStr(key: String, default: String = ""): String =
+        settings.safeGetString(key, default)
 
     /**
      * 测试 LLM 连接

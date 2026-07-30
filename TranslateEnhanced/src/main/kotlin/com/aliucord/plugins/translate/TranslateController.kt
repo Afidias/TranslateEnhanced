@@ -6,6 +6,7 @@ import com.aliucord.plugins.translate.backend.GoogleTranslator
 import com.aliucord.plugins.translate.backend.LLMTranslator
 import com.aliucord.plugins.translate.backend.TranslatorBackend
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
+import com.aliucord.plugins.translate.utils.safeGetString
 import com.discord.widgets.chat.list.WidgetChatList
 
 /**
@@ -60,7 +61,7 @@ class TranslateController(
         messageId: Long? = null
     ): TranslateResult {
         val cleanedText = TextCleaner.clean(text, settings)
-        val target = targetLang ?: "${settings.getString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)}"
+        val target = targetLang ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
         val backend = resolveBackend()
         var result = backend.translate(cleanedText, sourceLang, target)
@@ -141,16 +142,16 @@ class TranslateController(
         } ?: false
 
     private fun resolveBackend(): TranslatorBackend {
-        val choice = "${settings.getString(SETTINGS_KEY_BACKEND, "google")}"
+        val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
         return if (choice == "llm") {
             LLMTranslator(
-                baseUrl  = "${settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")}",
-                apiKey   = "${settings.getString(SETTINGS_KEY_LLM_API_KEY, "")}",
-                model    = "${settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini")}",
-                systemPrompt = "${settings.getString(
+                baseUrl  = settings.safeGetString(SETTINGS_KEY_LLM_BASE_URL),
+                apiKey   = settings.safeGetString(SETTINGS_KEY_LLM_API_KEY),
+                model    = settings.safeGetString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini"),
+                systemPrompt = settings.safeGetString(
                     SETTINGS_KEY_LLM_SYSTEM_PROMPT,
                     LLMTranslator.DEFAULT_SYSTEM_PROMPT
-                )}"
+                )
             )
         } else {
             GoogleTranslator()
