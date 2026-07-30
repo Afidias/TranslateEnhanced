@@ -97,20 +97,30 @@ class TranslateController(
         messageId: Long,
         onComplete: ((TranslateResult) -> Unit)? = null
     ) {
-        Utils.threadPool.execute {
-            val result = translateSync(text, sourceLang, targetLang, channelId, messageId)
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                if (result is TranslateResult.Success) {
-                    rerender(messageId)
-                } else {
-                    // 翻译失败：清除加载占位符，恢复原文显示
+        // 用 Thread 替代 Utils.threadPool，避免线程池问题导致崩溃
+        Thread {
+            try {
+                val result = translateSync(text, sourceLang, targetLang, channelId, messageId)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (result is TranslateResult.Success) {
+                        rerender(messageId)
+                    } else {
+                        // 翻译失败：清除加载占位符，恢复原文显示
+                        translatedMessages.remove(messageId)
+                        rerender(messageId)
+                        onShowToast("翻译失败: ${(result as TranslateResult.Error).errorText}", false)
+                    }
+                    onComplete?.invoke(result)
+                }
+            } catch (e: Exception) {
+                // 整个翻译流程崩溃：清除占位符，显示错误
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
                     translatedMessages.remove(messageId)
                     rerender(messageId)
-                    onShowToast("翻译失败: ${(result as TranslateResult.Error).errorText}", false)
+                    onShowToast("翻译异常: ${e.message}", false)
                 }
-                onComplete?.invoke(result)
             }
-        }
+        }.start()
     }
 
     /**

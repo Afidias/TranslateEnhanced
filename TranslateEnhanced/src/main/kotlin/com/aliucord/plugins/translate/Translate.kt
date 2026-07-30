@@ -82,19 +82,19 @@ class Translate : Plugin() {
                 if (!autoManager.isEnabled(channelId)) return@Hook
                 if (autoManager.isPaused(channelId)) return@Hook
 
-                // 异步读取消息并翻译
-                Utils.threadPool.execute {
+                // 异步读取消息并翻译（用 Thread 替代 Utils.threadPool）
+                Thread {
                     try {
                         val message = com.discord.stores.StoreStream
                             .getMessages()
                             .getMessage(channelId, messageId)
-                        val content = message?.content ?: return@execute
-                        if (content.isBlank()) return@execute
+                        val content = message?.content ?: return@Thread
+                        if (content.isBlank()) return@Thread
 
                         val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
                         // 语言检测：跳过目标语言的消息
-                        if (!LanguageDetector.shouldTranslate(content, targetLang)) return@execute
+                        if (!LanguageDetector.shouldTranslate(content, targetLang)) return@Thread
 
                         val result = controller.translateSync(
                             text = content,
