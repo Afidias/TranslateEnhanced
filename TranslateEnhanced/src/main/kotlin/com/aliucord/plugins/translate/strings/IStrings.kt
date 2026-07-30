@@ -27,4 +27,15 @@ interface IStrings {
     val settingsSupportedLanguages: String
 
     val loadingText: String
+
+    // LLM API 测试相关
+    val settingsTestConnection: String
+    val settingsFetchModels: String
+    val settingsTesting: String
+    val settingsFetchingModels: String
+    val settingsTestSuccess: String
+    val settingsTestFailed: String
+    val settingsModelsFetched: String
+    val settingsNoModelsFound: String
+    val settingsSelectModel: String
 }

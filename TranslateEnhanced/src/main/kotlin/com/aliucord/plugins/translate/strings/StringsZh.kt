@@ -27,4 +27,15 @@ object StringsZh : IStrings {
     override val settingsSupportedLanguages = "支持的语言："
 
     override val loadingText            = "翻译中..."
+
+    // LLM API 测试相关
+    override val settingsTestConnection = "测试连接"
+    override val settingsFetchModels    = "获取可用模型"
+    override val settingsTesting        = "正在测试连接..."
+    override val settingsFetchingModels = "正在获取模型列表..."
+    override val settingsTestSuccess    = "连接成功！"
+    override val settingsTestFailed     = "连接失败："
+    override val settingsModelsFetched  = "模型列表获取成功"
+    override val settingsNoModelsFound  = "未找到可用模型"
+    override val settingsSelectModel    = "选择模型"
 }

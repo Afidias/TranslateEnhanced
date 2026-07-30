@@ -27,4 +27,15 @@ object StringsEn : IStrings {
     override val settingsSupportedLanguages = "Supported languages:"
 
     override val loadingText            = "Translating..."
+
+    // LLM API 测试相关
+    override val settingsTestConnection = "Test Connection"
+    override val settingsFetchModels    = "Fetch Available Models"
+    override val settingsTesting        = "Testing connection..."
+    override val settingsFetchingModels = "Fetching models..."
+    override val settingsTestSuccess    = "Connection successful!"
+    override val settingsTestFailed     = "Connection failed: "
+    override val settingsModelsFetched  = "Models fetched successfully"
+    override val settingsNoModelsFound  = "No models found"
+    override val settingsSelectModel    = "Select a model"
 }
