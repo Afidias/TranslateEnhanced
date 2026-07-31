@@ -121,7 +121,7 @@ class LLMTranslator(
         }
 
         DebugLogger.log("[LLM] All attempts failed")
-        TranslateResult.Error(errorText = "LLM request exception: ${lastError?.message}")
+        return TranslateResult.Error(errorText = "LLM request exception: ${lastError?.message}")
     }
 
     private fun buildUserPrompt(text: String, sourceLang: String?, targetLang: String): String {

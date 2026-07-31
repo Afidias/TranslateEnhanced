@@ -48,50 +48,6 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         val backendLabels = mutableMapOf<String, String>()
         val backendTextViews = mutableMapOf<String, TextView>()
 
-        fun createBackendOption(label: String, value: String) {
-            backendLabels[value] = label
-            val labelView = TextView(ctx)
-            backendTextViews[value] = labelView
-            CardView(ctx).apply {
-                layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
-                    setMargins(6, 0, 6, 0)
-                }
-                setCardBackgroundColor(bgColor)
-                radius = 16f
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(20, 28, 20, 28)
-                    addView(labelView)
-                })
-                setOnClickListener {
-                    settings.setString(SETTINGS_KEY_BACKEND, value)
-                    refreshBackendSelection()
-                }
-            }.let { backendRow.addView(it) }
-        }
-
-        // 刷新后端选项的选中样式和 LLM 区域可见性
-        fun refreshBackendSelection() {
-            val backend = safeGetStr(SETTINGS_KEY_BACKEND, "google")
-            backendLabels.forEach { (value, label) ->
-                val selected = value == backend
-                backendTextViews[value]?.apply {
-                    text = if (selected) "✓  $label" else label
-                    setTextColor(textColor)
-                    setTypeface(
-                        typeface,
-                        if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
-                    )
-                }
-            }
-            llmSection.visibility = if (backend == "llm") View.VISIBLE else View.GONE
-        }
-
-        createBackendOption(strings.settingsBackendGoogle, "google")
-        createBackendOption(strings.settingsBackendLLM, "llm")
-        addView(backendRow)
-
         // ── LLM settings (shown only when backend = llm) ─────────
         val llmSection = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -120,9 +76,52 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
         llmSection.addView(buttonRow)
 
+        // 刷新后端选项的选中样式和 LLM 区域可见性（定义在 llmSection 之后）
+        fun refreshBackendSelection() {
+            val backend = safeGetStr(SETTINGS_KEY_BACKEND, "google")
+            backendLabels.forEach { (value, label) ->
+                val selected = value == backend
+                backendTextViews[value]?.apply {
+                    text = if (selected) "✓  $label" else label
+                    setTextColor(textColor)
+                    setTypeface(
+                        typeface,
+                        if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
+                    )
+                }
+            }
+            llmSection.visibility = if (backend == "llm") View.VISIBLE else View.GONE
+        }
+
+        fun createBackendOption(label: String, value: String) {
+            backendLabels[value] = label
+            val labelView = TextView(ctx)
+            backendTextViews[value] = labelView
+            CardView(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
+                    setMargins(6, 0, 6, 0)
+                }
+                setCardBackgroundColor(bgColor)
+                radius = 16f
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(20, 28, 20, 28)
+                    addView(labelView)
+                })
+                setOnClickListener {
+                    settings.setString(SETTINGS_KEY_BACKEND, value)
+                    refreshBackendSelection()
+                }
+            }.let { backendRow.addView(it) }
+        }
+
+        createBackendOption(strings.settingsBackendGoogle, "google")
+        createBackendOption(strings.settingsBackendLLM, "llm")
+        addView(backendRow)
         addView(llmSection)
 
-        // 初始化选中状态（在 llmSection 创建后调用）
+        // 初始化选中状态
         refreshBackendSelection()
 
         // ── Default language（点击弹出选择，动态更新文字）────────
