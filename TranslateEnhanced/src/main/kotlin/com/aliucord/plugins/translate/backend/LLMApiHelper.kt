@@ -1,9 +1,12 @@
 package com.aliucord.plugins.translate.backend
 
-import com.aliucord.Http
 import com.aliucord.plugins.translate.USER_AGENT
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * LLM API 辅助工具类
@@ -12,6 +15,10 @@ import org.json.JSONObject
  * 不是真正的 String，所有 String 方法（isBlank, trimEnd 等）都会崩溃。
  * 因此本类中所有参数类型为 Any，不调用任何 String 方法，
  * 靠 try-catch 接住所有异常。
+ *
+ * 使用原生 HttpURLConnection 而非 Aliucord Http：
+ * - 能正确读取错误流，拿到服务端真实错误信息
+ * - 避免 Aliucord Http 在 4xx/5xx 时抛出无意义的 "closed" 错误
  */
 object LLMApiHelper {
 
@@ -30,6 +37,7 @@ object LLMApiHelper {
      * 参数类型为 Any，避免对混淆类型调用 String 方法
      */
     fun testConnection(baseUrl: Any, apiKey: Any, model: Any): TestResult {
+        var conn: HttpURLConnection? = null
         return try {
             // 用 String.format 转换，如果失败会被 catch 接住
             val urlStr = String.format("%s", baseUrl)
@@ -41,15 +49,7 @@ object LLMApiHelper {
                 return TestResult.Error(errorText = "API Key or Base URL not configured")
             }
 
-            // 构建 URL（trimEnd 可能崩溃，用 try-catch 保护）
-            val cleanUrl = try {
-                urlStr.trimEnd('/')
-            } catch (e: Exception) {
-                urlStr
-            }
-            // 自动处理是否带 /v1：https://api.openai.com 或 https://api.openai.com/v1 都能正确拼接
-            val base = if (cleanUrl.endsWith("/v1")) cleanUrl else "$cleanUrl/v1"
-            val url = "$base/chat/completions"
+            val url = LLMTranslator.buildUrl(urlStr, "chat/completions")
 
             val requestBody = JSONObject().apply {
                 put("model", modelStr)
@@ -63,21 +63,36 @@ object LLMApiHelper {
                 })
             }
 
-            val response = Http.Request(url, "POST").apply {
-                setHeader("Content-Type", "application/json")
-                setHeader("Authorization", "Bearer $keyStr")
-                setHeader("User-Agent", USER_AGENT)
-                setRequestTimeout(120_000)
-            }.executeWithBody(requestBody.toString())
+            val bodyBytes = requestBody.toString().toByteArray(Charsets.UTF_8)
 
-            if (!response.ok()) {
+            conn = URL(url).openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $keyStr")
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "application/json")
+            conn.connectTimeout = 120_000
+            conn.readTimeout = 120_000
+            conn.doOutput = true
+            conn.setFixedLengthStreamingMode(bodyBytes.size)
+
+            conn.outputStream.use { out ->
+                out.write(bodyBytes)
+                out.flush()
+            }
+
+            val statusCode = conn.responseCode
+            val responseText = if (statusCode in 200..299) {
+                readStream(conn.inputStream)
+            } else {
+                val errBody = conn.errorStream?.let { readStream(it) } ?: ""
                 return TestResult.Error(
-                    errorCode = response.statusCode,
-                    errorText = "API request failed: ${response.text().take(200)}"
+                    errorCode = statusCode,
+                    errorText = "API request failed ($statusCode): ${errBody.take(200)}"
                 )
             }
 
-            val json = JSONObject(response.text())
+            val json = JSONObject(responseText)
             val content = json.getJSONArray("choices")
                 .getJSONObject(0)
                 .getJSONObject("message")
@@ -87,6 +102,8 @@ object LLMApiHelper {
             TestResult.Success("Connection successful. Model responded: $content")
         } catch (e: Exception) {
             TestResult.Error(errorText = "Connection failed: ${e.message}")
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) { }
         }
     }
 
@@ -95,6 +112,7 @@ object LLMApiHelper {
      * 参数类型为 Any，避免对混淆类型调用 String 方法
      */
     fun fetchModels(baseUrl: Any, apiKey: Any): ModelsResult {
+        var conn: HttpURLConnection? = null
         return try {
             val urlStr = String.format("%s", baseUrl)
             val keyStr = String.format("%s", apiKey)
@@ -103,28 +121,29 @@ object LLMApiHelper {
                 return ModelsResult.Error(errorText = "API Key or Base URL not configured")
             }
 
-            val cleanUrl = try {
-                urlStr.trimEnd('/')
-            } catch (e: Exception) {
-                urlStr
-            }
-            val base = if (cleanUrl.endsWith("/v1")) cleanUrl else "$cleanUrl/v1"
-            val url = "$base/models"
+            val url = LLMTranslator.buildUrl(urlStr, "models")
 
-            val response = Http.Request(url, "GET").apply {
-                setHeader("Content-Type", "application/json")
-                setHeader("Authorization", "Bearer $keyStr")
-                setHeader("User-Agent", USER_AGENT)
-            }.execute()
+            conn = URL(url).openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $keyStr")
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "application/json")
+            conn.connectTimeout = 60_000
+            conn.readTimeout = 60_000
 
-            if (!response.ok()) {
+            val statusCode = conn.responseCode
+            val responseText = if (statusCode in 200..299) {
+                readStream(conn.inputStream)
+            } else {
+                val errBody = conn.errorStream?.let { readStream(it) } ?: ""
                 return ModelsResult.Error(
-                    errorCode = response.statusCode,
-                    errorText = "Failed to fetch models: ${response.text().take(200)}"
+                    errorCode = statusCode,
+                    errorText = "Failed to fetch models ($statusCode): ${errBody.take(200)}"
                 )
             }
 
-            val json = JSONObject(response.text())
+            val json = JSONObject(responseText)
             val data = json.getJSONArray("data")
             val models = mutableListOf<String>()
 
@@ -141,6 +160,20 @@ object LLMApiHelper {
             }
         } catch (e: Exception) {
             ModelsResult.Error(errorText = "Failed to fetch models: ${e.message}")
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) { }
         }
+    }
+
+    private fun readStream(input: java.io.InputStream): String {
+        val reader = BufferedReader(InputStreamReader(input, Charsets.UTF_8))
+        val sb = StringBuilder()
+        reader.use { r ->
+            var line: String?
+            while (r.readLine().also { line = it } != null) {
+                sb.append(line)
+            }
+        }
+        return sb.toString()
     }
 }

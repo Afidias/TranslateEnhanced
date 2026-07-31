@@ -1,11 +1,14 @@
 package com.aliucord.plugins.translate.backend
 
-import com.aliucord.Http
 import com.aliucord.plugins.translate.TranslateResult
 import com.aliucord.plugins.translate.USER_AGENT
 import com.aliucord.plugins.translate.utils.DebugLogger
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * LLM 翻译后端
@@ -14,6 +17,11 @@ import org.json.JSONObject
  * Aliucord SettingsAPI.getString() 运行时返回混淆类型 d0.d0.b，
  * 声明为 String 会让 R8 优化掉所有类型转换代码。
  * 用 Any 接收 + String.format() 转换可以绕过 R8 优化。
+ *
+ * 使用原生 HttpURLConnection 而非 Aliucord Http：
+ * - Aliucord Http 在服务器返回 4xx/5xx 时读 getInputStream() 失败，
+ *   抛出无意义的 "closed" 错误，掩盖了真实错误原因
+ * - 原生 HttpURLConnection 能正确读取错误流拿到真实错误信息
  */
 class LLMTranslator(
     baseUrl: Any,
@@ -48,7 +56,8 @@ class LLMTranslator(
         val requestBody = JSONObject().apply {
             put("model", modelStr)
             put("temperature", 0.0)
-            put("max_tokens", 2048)
+            // 降低 max_tokens，某些服务商对 2048 有限制
+            put("max_tokens", 1024)
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
@@ -65,36 +74,53 @@ class LLMTranslator(
         DebugLogger.log("[LLM] Request URL: $url")
         DebugLogger.log("[LLM] Request body: ${requestBody.toString().take(500)}")
 
-        // 失败自动重试一次（长文本翻译时服务端可能临时关闭连接）
+        val bodyBytes = requestBody.toString().toByteArray(Charsets.UTF_8)
+
+        // 失败自动重试一次
         var lastError: Exception? = null
         var lastStatusCode = -1
         var lastErrorText = ""
 
         for (attempt in 0..1) {
+            var conn: HttpURLConnection? = null
             try {
-                val response = Http.Request(url, "POST").apply {
-                    setHeader("Content-Type", "application/json")
-                    setHeader("Authorization", "Bearer $apiKeyStr")
-                    setHeader("User-Agent", USER_AGENT)
-                    // 显式设置 2 分钟超时，避免长文本翻译时连接挂起
-                    setRequestTimeout(120_000)
-                }.executeWithBody(requestBody.toString())
+                conn = URL(url).openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer $apiKeyStr")
+                conn.setRequestProperty("User-Agent", USER_AGENT)
+                conn.setRequestProperty("Accept", "application/json")
+                conn.connectTimeout = 120_000
+                conn.readTimeout = 120_000
+                conn.doOutput = true
+                conn.setFixedLengthStreamingMode(bodyBytes.size)
 
-                DebugLogger.log("[LLM] Attempt ${attempt + 1} status: ${response.statusCode}")
-                DebugLogger.log("[LLM] Response body: ${response.text().take(500)}")
+                conn.outputStream.use { out ->
+                    out.write(bodyBytes)
+                    out.flush()
+                }
 
-                if (!response.ok()) {
-                    lastStatusCode = response.statusCode
-                    lastErrorText = response.text().take(200)
-                    DebugLogger.log("[LLM] Attempt ${attempt + 1} request failed: $lastErrorText")
+                val statusCode = conn.responseCode
+                DebugLogger.log("[LLM] Attempt ${attempt + 1} status: $statusCode")
+
+                val responseText = if (statusCode in 200..299) {
+                    readStream(conn.inputStream)
+                } else {
+                    // 错误流：拿到真实错误信息
+                    val errBody = conn.errorStream?.let { readStream(it) } ?: ""
+                    DebugLogger.log("[LLM] Attempt ${attempt + 1} error body: ${errBody.take(300)}")
+                    lastStatusCode = statusCode
+                    lastErrorText = errBody.take(300)
                     if (attempt == 0) continue
                     return TranslateResult.Error(
                         errorCode = lastStatusCode,
-                        errorText = "LLM API request failed: $lastErrorText"
+                        errorText = "LLM API request failed ($statusCode): $lastErrorText"
                     )
                 }
 
-                val json  = JSONObject(response.text())
+                DebugLogger.log("[LLM] Response body: ${responseText.take(500)}")
+
+                val json  = JSONObject(responseText)
                 val content = json.getJSONArray("choices")
                     .getJSONObject(0)
                     .getJSONObject("message")
@@ -117,11 +143,25 @@ class LLMTranslator(
                     // 短暂等待后重试
                     try { Thread.sleep(1000) } catch (ie: InterruptedException) { }
                 }
+            } finally {
+                try { conn?.disconnect() } catch (_: Exception) { }
             }
         }
 
         DebugLogger.log("[LLM] All attempts failed")
         return TranslateResult.Error(errorText = "LLM request exception: ${lastError?.message}")
+    }
+
+    private fun readStream(input: java.io.InputStream): String {
+        val reader = BufferedReader(InputStreamReader(input, Charsets.UTF_8))
+        val sb = StringBuilder()
+        reader.use { r ->
+            var line: String?
+            while (r.readLine().also { line = it } != null) {
+                sb.append(line)
+            }
+        }
+        return sb.toString()
     }
 
     private fun buildUserPrompt(text: String, sourceLang: String?, targetLang: String): String {
