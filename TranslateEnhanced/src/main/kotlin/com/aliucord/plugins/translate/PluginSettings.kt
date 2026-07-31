@@ -33,17 +33,49 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
         setActionBarTitle(strings.settingsTitle)
 
-        // ── Backend selector ──────────────────────────────────────
+        // ── Backend selector (二选一：Google / 大模型) ───────────
         addView(sectionLabel(strings.settingsBackendLabel, textColor))
 
-        val backendGoogle = switchRow(strings.settingsBackendGoogle, textColor).apply {
-            isChecked = safeGetStr(SETTINGS_KEY_BACKEND, "google") == "google"
-            setOnCheckedChangeListener { _, checked ->
-                settings.setString(SETTINGS_KEY_BACKEND, if (checked) "google" else "llm")
-                refreshUI()
+        val currentBackend = safeGetStr(SETTINGS_KEY_BACKEND, "google")
+
+        val backendRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 12, 0, 12)
+        }
+
+        fun backendOption(label: String, value: String): CardView {
+            val selected = currentBackend == value
+            return CardView(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
+                    setMargins(6, 0, 6, 0)
+                }
+                setCardBackgroundColor(bgColor)
+                radius = 16f
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(20, 28, 20, 28)
+                    addView(TextView(context).apply {
+                        text = if (selected) "✓  $label" else label
+                        setTextColor(textColor)
+                        textSize = 14f
+                        setTypeface(
+                            typeface,
+                            if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
+                        )
+                    })
+                })
+                setOnClickListener {
+                    settings.setString(SETTINGS_KEY_BACKEND, value)
+                    // 重新渲染设置页以刷新选中状态
+                    try { onViewBound(null) } catch (e: Exception) { }
+                }
             }
         }
-        addView(backendGoogle)
+
+        backendRow.addView(backendOption(strings.settingsBackendGoogle, "google"))
+        backendRow.addView(backendOption(strings.settingsBackendLLM, "llm"))
+        addView(backendRow)
 
         // ── LLM settings (shown only when backend = llm) ─────────
         val llmSection = LinearLayout(ctx).apply {
@@ -73,32 +105,20 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
         llmSection.addView(buttonRow)
 
-        val isLLM = safeGetStr(SETTINGS_KEY_BACKEND, "google") == "llm"
+        val isLLM = currentBackend == "llm"
         llmSection.visibility = if (isLLM) View.VISIBLE else View.GONE
         addView(llmSection)
 
-        backendGoogle.setOnCheckedChangeListener { _, checked ->
-            settings.setString(SETTINGS_KEY_BACKEND, if (checked) "google" else "llm")
-            llmSection.visibility = if (checked) View.GONE else View.VISIBLE
-        }
-
-        // ── Default language ──────────────────────────────────────
+        // ── Default language（点击弹出选择）──────────────────────
         addView(sectionLabel(strings.settingsDefaultLanguage, textColor))
 
-        val currentLang = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
+        val currentLangName = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
             ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
-        addView(cardRow("Default: $currentLang", textColor, bgColor))
 
-        addView(sectionLabel(strings.settingsSupportedLanguages, textColor))
-
-        languageCodes.forEach { (name, code) ->
-            addView(textRow(name, textColor) {
-                settings.setString(SETTINGS_KEY_DEFAULT_LANG, code)
-                Utils.showToast(strings.settingsLanguageSaved)
-                close()
-            })
-            addView(divider(bgColor))
-        }
+        addView(textRow("➜  $currentLangName", textColor) {
+            showLanguagePicker(strings)
+        })
+        addView(divider(bgColor))
 
         // ── Text cleaning toggles ────────────────────────────────
         addView(sectionLabel("Text cleaning", textColor))
@@ -234,6 +254,33 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                 .show()
         } catch (e: Exception) {
             Utils.showToast("Failed to show dialog: ${e.message}")
+        }
+    }
+
+    /**
+     * 显示目标语言选择对话框（单选框列表）
+     */
+    private fun showLanguagePicker(strings: IStrings) {
+        try {
+            val ctx = requireContext()
+            val names = languageCodes.keys.toTypedArray()
+            val currentCode = safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+            val currentIndex = languageCodes.values.indexOf(currentCode)
+
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                .setTitle(strings.settingsDefaultLanguage)
+                .setSingleChoiceItems(names, currentIndex) { dialog, which ->
+                    val code = languageCodes.values.elementAt(which)
+                    settings.setString(SETTINGS_KEY_DEFAULT_LANG, code)
+                    Utils.showToast(strings.settingsLanguageSaved)
+                    dialog.dismiss()
+                    // 刷新页面显示新语言
+                    try { onViewBound(null) } catch (e: Exception) { }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } catch (e: Exception) {
+            Utils.showToast("Failed to show language picker: ${e.message}")
         }
     }
 
