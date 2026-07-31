@@ -20,6 +20,7 @@ import com.aliucord.plugins.translate.auto.LanguageDetector
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.getStrings
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.api.commands.ApplicationCommandType
 import com.discord.databinding.WidgetChatListActionsBinding
 import com.discord.utilities.textprocessing.node.EditedMessageNode
@@ -49,6 +50,10 @@ class Translate : Plugin() {
         strings = ctx.getStrings()
         controller = TranslateController(settings)
         autoManager = AutoTranslateManager(settings)
+
+        // 初始化 debug 模式
+        DebugLogger.setEnabled(settings.getBool(SETTINGS_KEY_DEBUG_MODE, false))
+        DebugLogger.log("Plugin loaded. Debug mode: ${DebugLogger.isEnabled()}")
     }
 
     override fun start(context: Context) {

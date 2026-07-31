@@ -17,5 +17,8 @@ internal const val SETTINGS_KEY_LLM_BASE_URL     = "llmBaseUrl"
 internal const val SETTINGS_KEY_LLM_API_KEY      = "llmApiKey"
 internal const val SETTINGS_KEY_LLM_MODEL        = "llmModel"
 internal const val SETTINGS_KEY_LLM_SYSTEM_PROMPT = "llmSystemPrompt"
+internal const val SETTINGS_KEY_DEBUG_MODE        = "debugMode"
 
 internal const val CMD_NAME = "translate"
+
+internal const val DEBUG_LOG_PATH = "/sdcard/Aliucord/translate_debug.log"

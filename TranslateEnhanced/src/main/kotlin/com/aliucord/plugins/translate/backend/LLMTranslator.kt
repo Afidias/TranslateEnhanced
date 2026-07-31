@@ -3,6 +3,7 @@ package com.aliucord.plugins.translate.backend
 import com.aliucord.Http
 import com.aliucord.plugins.translate.TranslateResult
 import com.aliucord.plugins.translate.USER_AGENT
+import com.aliucord.plugins.translate.utils.DebugLogger
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,6 +42,9 @@ class LLMTranslator(
 
         val userPrompt = buildUserPrompt(text, sourceLang, targetLang)
 
+        DebugLogger.log("[LLM] System prompt: $systemPromptStr")
+        DebugLogger.log("[LLM] User prompt: ${userPrompt.take(300)}")
+
         val requestBody = JSONObject().apply {
             put("model", modelStr)
             put("temperature", 0.0)
@@ -58,6 +62,8 @@ class LLMTranslator(
         }
 
         val url = buildUrl(baseUrlStr, "chat/completions")
+        DebugLogger.log("[LLM] Request URL: $url")
+        DebugLogger.log("[LLM] Request body: ${requestBody.toString().take(500)}")
 
         return try {
             val response = Http.Request(url, "POST").apply {
@@ -66,7 +72,11 @@ class LLMTranslator(
                 setHeader("User-Agent", USER_AGENT)
             }.executeWithBody(requestBody.toString())
 
+            DebugLogger.log("[LLM] Response status: ${response.statusCode}")
+            DebugLogger.log("[LLM] Response body: ${response.text().take(500)}")
+
             if (!response.ok()) {
+                DebugLogger.log("[LLM] Request failed!")
                 return TranslateResult.Error(
                     errorCode = response.statusCode,
                     errorText = "LLM API request failed: ${response.text().take(200)}"
@@ -80,6 +90,9 @@ class LLMTranslator(
                 .getString("content")
                 .trim()
 
+            DebugLogger.log("[LLM] Parsed content: $content")
+            DebugLogger.log("[LLM] Same as input: ${content == text}")
+
             TranslateResult.Success(
                 sourceLanguage    = sourceLang ?: "auto",
                 translatedLanguage = targetLang,
@@ -87,6 +100,7 @@ class LLMTranslator(
                 translatedText    = content
             )
         } catch (e: Exception) {
+            DebugLogger.log("[LLM] Exception: ${e.message}")
             TranslateResult.Error(errorText = "LLM request exception: ${e.message}")
         }
     }

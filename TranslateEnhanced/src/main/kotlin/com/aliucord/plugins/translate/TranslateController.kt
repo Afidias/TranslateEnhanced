@@ -7,6 +7,7 @@ import com.aliucord.plugins.translate.backend.LLMTranslator
 import com.aliucord.plugins.translate.backend.TranslatorBackend
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.widgets.chat.list.WidgetChatList
 
 /**
@@ -62,12 +63,18 @@ class TranslateController(
     ): TranslateResult {
         val cleanedText = TextCleaner.clean(text, settings)
         val target = targetLang ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
-
         val backend = resolveBackend()
+        val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
+
+        DebugLogger.log("translateSync called: backend=$backendName, target=$target, sourceLang=${sourceLang ?: "auto"}")
+        DebugLogger.log("Original text: ${text.take(100)}")
+        DebugLogger.log("Cleaned text: ${cleanedText.take(100)}")
+
         var result = backend.translate(cleanedText, sourceLang, target)
 
         // LLM 失败降级到 Google
         if (result is TranslateResult.Error && backend !is GoogleTranslator) {
+            DebugLogger.log("LLM failed, falling back to Google: ${(result as TranslateResult.Error).errorText}")
             val fallback = GoogleTranslator()
             val fbResult = fallback.translate(cleanedText, sourceLang, target)
             if (fbResult is TranslateResult.Success) {
@@ -75,6 +82,33 @@ class TranslateController(
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     onShowToast("已降级到 Google Translate", false)
                 }
+            }
+        }
+
+        // 记录翻译结果
+        when (result) {
+            is TranslateResult.Success -> {
+                DebugLogger.logTranslation(
+                    sourceText = text,
+                    cleanedText = cleanedText,
+                    sourceLang = sourceLang,
+                    targetLang = target,
+                    backend = backendName,
+                    resultType = "Success",
+                    translatedText = result.translatedText
+                )
+            }
+            is TranslateResult.Error -> {
+                DebugLogger.logTranslation(
+                    sourceText = text,
+                    cleanedText = cleanedText,
+                    sourceLang = sourceLang,
+                    targetLang = target,
+                    backend = backendName,
+                    resultType = "Error",
+                    translatedText = "",
+                    errorText = result.errorText
+                )
             }
         }
 

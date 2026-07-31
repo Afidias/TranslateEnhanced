@@ -38,4 +38,10 @@ interface IStrings {
     val settingsModelsFetched: String
     val settingsNoModelsFound: String
     val settingsSelectModel: String
+
+    // Debug mode
+    val settingsDebugMode: String
+    val settingsDebugModeDesc: String
+    val settingsDebugClearLog: String
+    val settingsDebugLogPath: String
 }

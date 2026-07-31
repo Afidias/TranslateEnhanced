@@ -12,6 +12,7 @@ import com.aliucord.plugins.translate.backend.LLMApiHelper
 import com.aliucord.plugins.translate.strings.IStrings
 import com.aliucord.plugins.translate.utils.getStrings
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.utilities.color.ColorCompat
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
@@ -113,6 +114,27 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         addView(switchRow(strings.settingsCleanEmoji, textColor).apply {
             isChecked = settings.getBool(SETTINGS_KEY_CLEAN_EMOJI, true)
             setOnCheckedChangeListener { _, v -> settings.setBool(SETTINGS_KEY_CLEAN_EMOJI, v) }
+        })
+
+        // ── Debug mode ───────────────────────────────────────────
+        addView(sectionLabel(strings.settingsDebugMode, textColor))
+
+        addView(switchRow(strings.settingsDebugModeDesc, textColor).apply {
+            isChecked = settings.getBool(SETTINGS_KEY_DEBUG_MODE, false)
+            setOnCheckedChangeListener { _, v ->
+                settings.setBool(SETTINGS_KEY_DEBUG_MODE, v)
+                DebugLogger.setEnabled(v)
+                Utils.showToast(if (v) "Debug ON → ${DEBUG_LOG_PATH}" else "Debug OFF")
+            }
+        })
+
+        addView(textRow(strings.settingsDebugLogPath, textColor) {
+            Utils.showToast(strings.settingsDebugLogPath)
+        })
+
+        addView(button(strings.settingsDebugClearLog, textColor, bgColor) {
+            DebugLogger.clearLog()
+            Utils.showToast("Log cleared")
         })
     }
 

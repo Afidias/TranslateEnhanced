@@ -38,4 +38,10 @@ object StringsZh : IStrings {
     override val settingsModelsFetched  = "模型列表获取成功"
     override val settingsNoModelsFound  = "未找到可用模型"
     override val settingsSelectModel    = "选择模型"
+
+    // Debug mode
+    override val settingsDebugMode      = "调试模式"
+    override val settingsDebugModeDesc  = "记录翻译详情到文件"
+    override val settingsDebugClearLog  = "清除调试日志"
+    override val settingsDebugLogPath   = "日志文件：/sdcard/Aliucord/translate_debug.log"
 }

@@ -38,4 +38,10 @@ object StringsEn : IStrings {
     override val settingsModelsFetched  = "Models fetched successfully"
     override val settingsNoModelsFound  = "No models found"
     override val settingsSelectModel    = "Select a model"
+
+    // Debug mode
+    override val settingsDebugMode      = "Debug Mode"
+    override val settingsDebugModeDesc  = "Log translation details to file"
+    override val settingsDebugClearLog  = "Clear Debug Log"
+    override val settingsDebugLogPath   = "Log file: /sdcard/Aliucord/translate_debug.log"
 }

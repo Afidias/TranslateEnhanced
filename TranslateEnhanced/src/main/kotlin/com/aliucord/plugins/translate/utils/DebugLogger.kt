@@ -1,0 +1,80 @@
+package com.aliucord.plugins.translate.utils
+
+import com.aliucord.plugins.translate.DEBUG_LOG_PATH
+import java.io.File
+import java.io.FileWriter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Debug 日志工具
+ * 将插件运行日志写入文件，用于定位翻译问题
+ */
+object DebugLogger {
+
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    private var enabled = false
+
+    fun setEnabled(value: Boolean) {
+        enabled = value
+        if (enabled) {
+            log("========== Debug Mode Enabled ==========")
+        }
+    }
+
+    fun isEnabled(): Boolean = enabled
+
+    fun log(tag: String, message: String) {
+        if (!enabled) return
+        try {
+            val timestamp = dateFormat.format(Date())
+            val logLine = "[$timestamp] [$tag] $message\n"
+
+            val file = File(DEBUG_LOG_PATH)
+            file.parentFile?.mkdirs()
+            FileWriter(file, true).use { writer ->
+                writer.append(logLine)
+            }
+        } catch (_: Exception) { }
+    }
+
+    fun log(message: String) {
+        log("TranslateEnhanced", message)
+    }
+
+    fun logTranslation(
+        sourceText: String,
+        cleanedText: String,
+        sourceLang: String?,
+        targetLang: String,
+        backend: String,
+        resultType: String,
+        translatedText: String,
+        errorText: String? = null
+    ) {
+        if (!enabled) return
+        log("=== Translation Start ===")
+        log("Source: $sourceText")
+        log("Cleaned: $cleanedText")
+        log("SourceLang: ${sourceLang ?: "auto"}")
+        log("TargetLang: $targetLang")
+        log("Backend: $backend")
+        log("Result: $resultType")
+        if (errorText != null) {
+            log("Error: $errorText")
+        } else {
+            log("Translated: $translatedText")
+            log("SameAsSource: ${sourceText == translatedText}")
+            log("SameAsCleaned: ${cleanedText == translatedText}")
+        }
+        log("=== Translation End ===")
+    }
+
+    fun clearLog() {
+        try {
+            val file = File(DEBUG_LOG_PATH)
+            if (file.exists()) file.delete()
+        } catch (_: Exception) { }
+    }
+}
