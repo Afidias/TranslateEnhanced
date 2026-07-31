@@ -65,44 +65,63 @@ class LLMTranslator(
         DebugLogger.log("[LLM] Request URL: $url")
         DebugLogger.log("[LLM] Request body: ${requestBody.toString().take(500)}")
 
-        return try {
-            val response = Http.Request(url, "POST").apply {
-                setHeader("Content-Type", "application/json")
-                setHeader("Authorization", "Bearer $apiKeyStr")
-                setHeader("User-Agent", USER_AGENT)
-            }.executeWithBody(requestBody.toString())
+        // 失败自动重试一次（长文本翻译时服务端可能临时关闭连接）
+        var lastError: Exception? = null
+        var lastStatusCode = -1
+        var lastErrorText = ""
 
-            DebugLogger.log("[LLM] Response status: ${response.statusCode}")
-            DebugLogger.log("[LLM] Response body: ${response.text().take(500)}")
+        for (attempt in 0..1) {
+            try {
+                val response = Http.Request(url, "POST").apply {
+                    setHeader("Content-Type", "application/json")
+                    setHeader("Authorization", "Bearer $apiKeyStr")
+                    setHeader("User-Agent", USER_AGENT)
+                    // 显式设置 2 分钟超时，避免长文本翻译时连接挂起
+                    setRequestTimeout(120_000)
+                }.executeWithBody(requestBody.toString())
 
-            if (!response.ok()) {
-                DebugLogger.log("[LLM] Request failed!")
-                return TranslateResult.Error(
-                    errorCode = response.statusCode,
-                    errorText = "LLM API request failed: ${response.text().take(200)}"
+                DebugLogger.log("[LLM] Attempt ${attempt + 1} status: ${response.statusCode}")
+                DebugLogger.log("[LLM] Response body: ${response.text().take(500)}")
+
+                if (!response.ok()) {
+                    lastStatusCode = response.statusCode
+                    lastErrorText = response.text().take(200)
+                    DebugLogger.log("[LLM] Attempt ${attempt + 1} request failed: $lastErrorText")
+                    if (attempt == 0) continue
+                    return TranslateResult.Error(
+                        errorCode = lastStatusCode,
+                        errorText = "LLM API request failed: $lastErrorText"
+                    )
+                }
+
+                val json  = JSONObject(response.text())
+                val content = json.getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+                    .trim()
+
+                DebugLogger.log("[LLM] Parsed content: $content")
+                DebugLogger.log("[LLM] Same as input: ${content == text}")
+
+                return TranslateResult.Success(
+                    sourceLanguage    = sourceLang ?: "auto",
+                    translatedLanguage = targetLang,
+                    sourceText        = text,
+                    translatedText    = content
                 )
+            } catch (e: Exception) {
+                lastError = e
+                DebugLogger.log("[LLM] Attempt ${attempt + 1} exception: ${e.message}")
+                if (attempt == 0) {
+                    // 短暂等待后重试
+                    try { Thread.sleep(1000) } catch (ie: InterruptedException) { }
+                }
             }
-
-            val json  = JSONObject(response.text())
-            val content = json.getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content")
-                .trim()
-
-            DebugLogger.log("[LLM] Parsed content: $content")
-            DebugLogger.log("[LLM] Same as input: ${content == text}")
-
-            TranslateResult.Success(
-                sourceLanguage    = sourceLang ?: "auto",
-                translatedLanguage = targetLang,
-                sourceText        = text,
-                translatedText    = content
-            )
-        } catch (e: Exception) {
-            DebugLogger.log("[LLM] Exception: ${e.message}")
-            TranslateResult.Error(errorText = "LLM request exception: ${e.message}")
         }
+
+        DebugLogger.log("[LLM] All attempts failed")
+        TranslateResult.Error(errorText = "LLM request exception: ${lastError?.message}")
     }
 
     private fun buildUserPrompt(text: String, sourceLang: String?, targetLang: String): String {

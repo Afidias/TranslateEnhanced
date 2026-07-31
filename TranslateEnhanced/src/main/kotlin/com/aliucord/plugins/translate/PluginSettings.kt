@@ -24,6 +24,9 @@ private const val WRAP_CONTENT = ViewGroup.LayoutParams.WRAP_CONTENT
 
 class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
+    // 模型输入框引用，选择模型后直接更新，无需重建页面
+    private var modelInput: TextInputEditText? = null
+
     override fun onViewBound(view: View?) {
         super.onViewBound(view)
         val ctx = requireContext()
@@ -36,16 +39,20 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         // ── Backend selector (二选一：Google / 大模型) ───────────
         addView(sectionLabel(strings.settingsBackendLabel, textColor))
 
-        val currentBackend = safeGetStr(SETTINGS_KEY_BACKEND, "google")
-
         val backendRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 12, 0, 12)
         }
 
-        fun backendOption(label: String, value: String): CardView {
-            val selected = currentBackend == value
-            return CardView(ctx).apply {
+        // 存储每个后端选项的 (label, TextView)，用于动态刷新选中状态
+        val backendLabels = mutableMapOf<String, String>()
+        val backendTextViews = mutableMapOf<String, TextView>()
+
+        fun createBackendOption(label: String, value: String) {
+            backendLabels[value] = label
+            val labelView = TextView(ctx)
+            backendTextViews[value] = labelView
+            CardView(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
                     setMargins(6, 0, 6, 0)
                 }
@@ -55,26 +62,34 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = android.view.Gravity.CENTER
                     setPadding(20, 28, 20, 28)
-                    addView(TextView(context).apply {
-                        text = if (selected) "✓  $label" else label
-                        setTextColor(textColor)
-                        textSize = 14f
-                        setTypeface(
-                            typeface,
-                            if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
-                        )
-                    })
+                    addView(labelView)
                 })
                 setOnClickListener {
                     settings.setString(SETTINGS_KEY_BACKEND, value)
-                    // 重新渲染设置页以刷新选中状态
-                    try { onViewBound(null) } catch (e: Exception) { }
+                    refreshBackendSelection()
                 }
-            }
+            }.let { backendRow.addView(it) }
         }
 
-        backendRow.addView(backendOption(strings.settingsBackendGoogle, "google"))
-        backendRow.addView(backendOption(strings.settingsBackendLLM, "llm"))
+        // 刷新后端选项的选中样式和 LLM 区域可见性
+        fun refreshBackendSelection() {
+            val backend = safeGetStr(SETTINGS_KEY_BACKEND, "google")
+            backendLabels.forEach { (value, label) ->
+                val selected = value == backend
+                backendTextViews[value]?.apply {
+                    text = if (selected) "✓  $label" else label
+                    setTextColor(textColor)
+                    setTypeface(
+                        typeface,
+                        if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
+                    )
+                }
+            }
+            llmSection.visibility = if (backend == "llm") View.VISIBLE else View.GONE
+        }
+
+        createBackendOption(strings.settingsBackendGoogle, "google")
+        createBackendOption(strings.settingsBackendLLM, "llm")
         addView(backendRow)
 
         // ── LLM settings (shown only when backend = llm) ─────────
@@ -105,19 +120,28 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
         llmSection.addView(buttonRow)
 
-        val isLLM = currentBackend == "llm"
-        llmSection.visibility = if (isLLM) View.VISIBLE else View.GONE
         addView(llmSection)
 
-        // ── Default language（点击弹出选择）──────────────────────
+        // 初始化选中状态（在 llmSection 创建后调用）
+        refreshBackendSelection()
+
+        // ── Default language（点击弹出选择，动态更新文字）────────
         addView(sectionLabel(strings.settingsDefaultLanguage, textColor))
 
-        val currentLangName = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
-            ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+        val langRow = TextView(ctx).apply {
+            setPadding(0, 15, 0, 15)
+            setTextColor(textColor)
+            setOnClickListener { showLanguagePicker(strings, this) }
+        }
 
-        addView(textRow("➜  $currentLangName", textColor) {
-            showLanguagePicker(strings)
-        })
+        fun refreshLangRow() {
+            val name = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
+                ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+            langRow.text = "➜  $name"
+        }
+
+        refreshLangRow()
+        addView(langRow)
         addView(divider(bgColor))
 
         // ── Text cleaning toggles ────────────────────────────────
@@ -243,12 +267,8 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                     val selectedModel = models[which]
                     settings.setString(SETTINGS_KEY_LLM_MODEL, selectedModel)
                     Utils.showToast("Model set to: $selectedModel")
-                    // 刷新页面以显示新选择的模型
-                    try {
-                        onViewBound(null)
-                    } catch (e: Exception) {
-                        // 忽略刷新错误
-                    }
+                    // 直接更新模型输入框，无需重建页面
+                    modelInput?.setText(selectedModel)
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -259,8 +279,9 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
     /**
      * 显示目标语言选择对话框（单选框列表）
+     * 选择后动态更新 langRow 文字，不重建页面
      */
-    private fun showLanguagePicker(strings: IStrings) {
+    private fun showLanguagePicker(strings: IStrings, langRow: TextView? = null) {
         try {
             val ctx = requireContext()
             val names = languageCodes.keys.toTypedArray()
@@ -274,8 +295,10 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                     settings.setString(SETTINGS_KEY_DEFAULT_LANG, code)
                     Utils.showToast(strings.settingsLanguageSaved)
                     dialog.dismiss()
-                    // 刷新页面显示新语言
-                    try { onViewBound(null) } catch (e: Exception) { }
+                    // 动态更新语言行文字
+                    val name = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
+                        ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+                    langRow?.text = "➜  $name"
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -331,6 +354,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             addView(TextInputEditText(context).apply {
                 setText(safeGetStr(key))
                 setTextColor(textColor)
+                if (key == SETTINGS_KEY_LLM_MODEL) modelInput = this
                 if (isPassword) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
                 setOnFocusChangeListener { _, hasFocus ->
                     if (!hasFocus) {

@@ -67,6 +67,7 @@ object LLMApiHelper {
                 setHeader("Content-Type", "application/json")
                 setHeader("Authorization", "Bearer $keyStr")
                 setHeader("User-Agent", USER_AGENT)
+                setRequestTimeout(120_000)
             }.executeWithBody(requestBody.toString())
 
             if (!response.ok()) {
