@@ -1,6 +1,7 @@
 package com.aliucord.plugins.translate
 
 import com.aliucord.api.SettingsAPI
+import com.aliucord.plugins.translate.utils.toRealString
 
 object TextCleaner {
 
@@ -14,8 +15,8 @@ object TextCleaner {
 
     fun clean(text: String, settings: SettingsAPI): String {
         // 防御：运行时消息内容可能是混淆类型（如 d0.d0.b）而非真实 String，
-        // String.format 强制转换（R8 无法优化，会真实调用 toString）
-        var result = String.format("%s", text)
+        // 通过 CharSequence 反射逐字符提取真实 String
+        var result = text.toRealString()
 
         if (settings.getBool(SETTINGS_KEY_CLEAN_HTML, true)) {
             result = result.replace(HTML_TAG_REGEX, "")

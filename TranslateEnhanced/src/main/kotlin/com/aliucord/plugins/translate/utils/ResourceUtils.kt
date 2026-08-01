@@ -13,6 +13,48 @@ fun Context.getStrings(): IStrings =
     }
 
 /**
+ * 把任意运行时值转换为真实 String。
+ *
+ * Aliucord 中部分"String"（如 Message.content、设置值）在运行时是混淆后的
+ * CharSequence 包装类（如 d0.d0.b），对它们调用 Kotlin 字符串扩展（isBlank 等）
+ * 会在应用侧标准库中触发 IntIterator 强转崩溃。直接调用 toString() 或
+ * String.format 也可能被 R8 基于声明类型优化掉。
+ *
+ * 这里通过 CharSequence 接口的反射方法（length/charAt）逐字符提取：
+ * - 反射调用 R8 无法优化，且按运行时类型分派，对真实 String 和混淆包装类都有效
+ * - 混淆包装类必定实现 CharSequence（否则应用自身也无法使用）
+ */
+fun Any?.toRealString(): String {
+    if (this == null) return ""
+    return try {
+        val cs = java.lang.CharSequence::class.java
+        val lengthMethod = cs.getMethod("length")
+        val charAtMethod = cs.getMethod("charAt", Integer.TYPE)
+        val len = lengthMethod.invoke(this) as Int
+        val sb = StringBuilder(len.coerceAtLeast(0))
+        var i = 0
+        while (i < len) {
+            sb.append(charAtMethod.invoke(this, i) as Char)
+            i++
+        }
+        sb.toString()
+    } catch (e: Exception) {
+        // 兜底：反射调用 toString
+        try {
+            val m = Any::class.java.getMethod("toString")
+            val r = m.invoke(this)
+            if (r != null) {
+                val baos = java.io.ByteArrayOutputStream()
+                java.io.PrintStream(baos).print(r)
+                baos.toString("UTF-8")
+            } else ""
+        } catch (e2: Exception) {
+            ""
+        }
+    }
+}
+
+/**
  * 安全读取 String 设置项
  *
  * Aliucord SettingsAPI 的 getString() 声明返回 String，

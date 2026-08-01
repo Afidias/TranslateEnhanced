@@ -1,6 +1,7 @@
 package com.aliucord.plugins.translate.backend
 
 import com.aliucord.plugins.translate.USER_AGENT
+import com.aliucord.plugins.translate.utils.toRealString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -39,10 +40,10 @@ object LLMApiHelper {
     fun testConnection(baseUrl: Any, apiKey: Any, model: Any): TestResult {
         var conn: HttpURLConnection? = null
         return try {
-            // 用 String.format 转换，如果失败会被 catch 接住
-            val urlStr = String.format("%s", baseUrl)
-            val keyStr = String.format("%s", apiKey)
-            val modelStr = String.format("%s", model)
+            // 用 CharSequence 反射转换，如果失败会被 catch 接住
+            val urlStr = baseUrl.toRealString()
+            val keyStr = apiKey.toRealString()
+            val modelStr = model.toRealString()
 
             // 检查是否为空（用 equals 而不是 isBlank，equals 是 Object 方法）
             if (urlStr == "" || keyStr == "") {
@@ -114,8 +115,8 @@ object LLMApiHelper {
     fun fetchModels(baseUrl: Any, apiKey: Any): ModelsResult {
         var conn: HttpURLConnection? = null
         return try {
-            val urlStr = String.format("%s", baseUrl)
-            val keyStr = String.format("%s", apiKey)
+            val urlStr = baseUrl.toRealString()
+            val keyStr = apiKey.toRealString()
 
             if (urlStr == "" || keyStr == "") {
                 return ModelsResult.Error(errorText = "API Key or Base URL not configured")

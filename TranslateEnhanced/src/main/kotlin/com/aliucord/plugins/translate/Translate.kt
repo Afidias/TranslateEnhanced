@@ -20,6 +20,7 @@ import com.aliucord.plugins.translate.auto.LanguageDetector
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.getStrings
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.toRealString
 import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.api.commands.ApplicationCommandType
 import com.discord.databinding.WidgetChatListActionsBinding
@@ -101,7 +102,7 @@ class Translate : Plugin() {
                             .getMessage(channelId, messageId)
                         val content = message?.content ?: return@submit
                         // 防御：混淆后的消息内容可能不是真实 String，先转换再做字符串操作
-                        val safeContent = String.format("%s", content)
+                        val safeContent = content.toRealString()
                         if (safeContent.isBlank()) return@submit
 
                         // 清理后为空（例如只有表情的消息）直接跳过，不计数失败
@@ -188,7 +189,7 @@ class Translate : Plugin() {
                 if (data.showingOriginal) return@Hook
                 // 源文本内容变更检测：消息被编辑后清除旧译文缓存，显示原文
                 // 两侧都转换（message.content 运行时可能是混淆类型）
-                if (data.sourceText != String.format("%s", message.content)) {
+                if (data.sourceText != message.content.toRealString()) {
                     controller.invalidate(id)
                     return@Hook
                 }

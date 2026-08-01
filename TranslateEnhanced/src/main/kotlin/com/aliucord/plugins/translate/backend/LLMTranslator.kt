@@ -3,6 +3,7 @@ package com.aliucord.plugins.translate.backend
 import com.aliucord.plugins.translate.TranslateResult
 import com.aliucord.plugins.translate.USER_AGENT
 import com.aliucord.plugins.translate.utils.DebugLogger
+import com.aliucord.plugins.translate.utils.toRealString
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -30,10 +31,10 @@ class LLMTranslator(
     systemPrompt: Any = DEFAULT_SYSTEM_PROMPT
 ) : TranslatorBackend {
 
-    private val baseUrlStr: String = String.format("%s", baseUrl)
-    private val apiKeyStr: String = String.format("%s", apiKey)
-    private val modelStr: String = String.format("%s", model)
-    private val systemPromptStr: String = String.format("%s", systemPrompt)
+    private val baseUrlStr: String = baseUrl.toRealString()
+    private val apiKeyStr: String = apiKey.toRealString()
+    private val modelStr: String = model.toRealString()
+    private val systemPromptStr: String = systemPrompt.toRealString()
 
     override fun translate(
         text: String,

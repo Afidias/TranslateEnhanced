@@ -9,6 +9,7 @@ import com.aliucord.plugins.translate.strings.IStrings
 import com.aliucord.plugins.translate.utils.DebugLogger
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.toRealString
 import com.discord.widgets.chat.list.WidgetChatList
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -124,8 +125,8 @@ class TranslateController(
         messageId: Long? = null
     ): TranslateResult {
         // 防御：运行时消息内容可能是混淆类型而非真实 String（d0.d0.b），
-        // String.format 强制转换后再做任何字符串操作
-        val safeText = String.format("%s", text)
+        // 用 CharSequence 反射提取真实 String 后再做任何字符串操作
+        val safeText = text.toRealString()
         val cleanedText = TextCleaner.clean(safeText, settings)
         val target = targetLang ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
         val backend = resolveBackend()
@@ -269,7 +270,7 @@ class TranslateController(
         if (pendingMessages.contains(messageId)) return
 
         // 防御转换：兼容运行时混淆类型
-        val safeText = String.format("%s", text)
+        val safeText = text.toRealString()
 
         // 先存一个占位符，让 processMessageText 渲染“翻译中...”
         translatedMessages[messageId] = TranslateResult.Success(
