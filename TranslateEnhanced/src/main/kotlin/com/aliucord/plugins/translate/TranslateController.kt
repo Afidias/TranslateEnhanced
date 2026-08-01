@@ -5,10 +5,16 @@ import com.aliucord.api.SettingsAPI
 import com.aliucord.plugins.translate.backend.GoogleTranslator
 import com.aliucord.plugins.translate.backend.LLMTranslator
 import com.aliucord.plugins.translate.backend.TranslatorBackend
+import com.aliucord.plugins.translate.strings.IStrings
+import com.aliucord.plugins.translate.utils.DebugLogger
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.safeGetString
-import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.widgets.chat.list.WidgetChatList
+import java.util.Collections
+import java.util.LinkedHashMap
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * 翻译控制器：调度后端、管理结果缓存、驱动 UI 刷新。
@@ -19,25 +25,83 @@ import com.discord.widgets.chat.list.WidgetChatList
  * 3. 缓存译文结果
  * 4. 降级策略：LLM 失败自动回退 Google
  * 5. 通知 UI 刷新消息
+ *
+ * 线程模型：
+ * - 所有翻译任务提交到插件自有的有界线程池，避免每条消息新建 Thread
+ * - 缓存使用同步的 LRU Map（容量上限 MAX_CACHE_SIZE），防止内存无限增长
+ * - pendingMessages 记录正在翻译中的消息，避免同一消息重复翻译
  */
 class TranslateController(
     private val settings: SettingsAPI,
+    private val strings: IStrings,
     private val onShowToast: (String, Boolean) -> Unit = { msg, isLong -> Utils.showToast(msg, isLong) }
 ) {
-    private val translatedMessages = mutableMapOf<Long, TranslateResult.Success>()
+    private val translatedMessages: MutableMap<Long, TranslateResult.Success> =
+        Collections.synchronizedMap(
+            object : LinkedHashMap<Long, TranslateResult.Success>(16, 0.75f, true) {
+                override fun removeEldestEntry(
+                    eldest: MutableMap.MutableEntry<Long, TranslateResult.Success>
+                ): Boolean = size > MAX_CACHE_SIZE
+            }
+        )
+    private val pendingMessages = ConcurrentHashMap.newKeySet<Long>()
+
+    @Volatile
+    private var executor: ExecutorService? = null
+
     private var chatList: WidgetChatList? = null
 
     fun attachChatList(list: WidgetChatList) { chatList = list }
 
-    /**
-     * 获取指定消息的缓存译文，若没有则返回 null。
-     */
+    /** 获取指定消息的缓存译文，若没有则返回 null。 */
     fun getCached(messageId: Long): TranslateResult.Success? = translatedMessages[messageId]
+
+    /** 使指定消息的缓存失效（例如消息被编辑后）。 */
+    fun invalidate(messageId: Long) {
+        translatedMessages.remove(messageId)
+    }
+
+    /** 标记一条消息开始翻译，返回 false 表示已在翻译中。 */
+    fun beginTranslate(messageId: Long): Boolean = pendingMessages.add(messageId)
+
+    /** 标记一条消息翻译结束。 */
+    fun endTranslate(messageId: Long) {
+        pendingMessages.remove(messageId)
+    }
+
+    /** 提交一个后台任务（翻译）到插件线程池。 */
+    fun submit(task: () -> Unit) {
+        getExecutor().execute(task)
+    }
+
+    /** 插件卸载时调用：停止线程池、清空缓存。 */
+    fun shutdown() {
+        executor?.shutdownNow()
+        executor = null
+        translatedMessages.clear()
+        pendingMessages.clear()
+        chatList = null
+    }
+
+    private fun getExecutor(): ExecutorService {
+        var e = executor
+        if (e == null || e.isShutdown) {
+            synchronized(this) {
+                e = executor
+                if (e == null || e.isShutdown) {
+                    e = Executors.newFixedThreadPool(TRANSLATE_THREADS)
+                    executor = e
+                }
+            }
+        }
+        return e!!
+    }
 
     /**
      * 切换译文/原文显示。
      */
     fun toggleOriginal(messageId: Long) {
+        if (isLoading(messageId)) return
         translatedMessages[messageId]?.let {
             it.showingOriginal = !it.showingOriginal
             rerender(messageId)
@@ -66,22 +130,43 @@ class TranslateController(
         val backend = resolveBackend()
         val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
 
+        if (cleanedText.isBlank()) {
+            DebugLogger.log("translateSync: nothing to translate after cleaning")
+            return TranslateResult.Error(errorText = ERROR_EMPTY_AFTER_CLEAN)
+        }
+
         DebugLogger.log("translateSync called: backend=$backendName, target=$target, sourceLang=${sourceLang ?: "auto"}")
         DebugLogger.log("Original text: ${text.take(100)}")
         DebugLogger.log("Cleaned text: ${cleanedText.take(100)}")
 
-        var result = backend.translate(cleanedText, sourceLang, target)
+        var result: TranslateResult
+        try {
+            result = backend.translate(cleanedText, sourceLang, target)
+        } catch (e: Exception) {
+            DebugLogger.log("Backend threw exception: ${e.message}")
+            result = TranslateResult.Error(errorText = ERROR_BACKEND_EXCEPTION + (e.message ?: "Unknown"))
+        }
+
+        // 空译文视为失败，避免消息永远卡在“翻译中...”
+        if (result is TranslateResult.Success && result.translatedText.isBlank()) {
+            DebugLogger.log("Backend returned an empty translation")
+            result = TranslateResult.Error(errorText = ERROR_EMPTY_TRANSLATION)
+        }
 
         // LLM 失败降级到 Google
         if (result is TranslateResult.Error && backend !is GoogleTranslator) {
             DebugLogger.log("LLM failed, falling back to Google: ${(result as TranslateResult.Error).errorText}")
-            val fallback = GoogleTranslator()
-            val fbResult = fallback.translate(cleanedText, sourceLang, target)
-            if (fbResult is TranslateResult.Success) {
-                result = fbResult
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    onShowToast("已降级到 Google Translate", false)
+            try {
+                val fallback = GoogleTranslator()
+                val fbResult = fallback.translate(cleanedText, sourceLang, target)
+                if (fbResult is TranslateResult.Success && fbResult.translatedText.isNotBlank()) {
+                    result = fbResult
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        onShowToast(strings.toastBackendFallback, false)
+                    }
                 }
+            } catch (e: Exception) {
+                DebugLogger.log("Google fallback threw exception: ${e.message}")
             }
         }
 
@@ -112,16 +197,16 @@ class TranslateController(
             }
         }
 
-        // 成功时缓存
+        // 成功时缓存；sourceText 保存原始文本（未清理），供消息编辑检测使用
         if (result is TranslateResult.Success && messageId != null) {
-            translatedMessages[messageId] = result
+            translatedMessages[messageId] = result.copy(sourceText = text)
         }
 
         return result
     }
 
     /**
-     * 异步翻译：在后台线程执行，完成后在主线程刷新 UI。
+     * 异步翻译：在线程池执行，完成后在主线程刷新 UI。
      */
     fun translateAsync(
         text: String,
@@ -131,8 +216,9 @@ class TranslateController(
         messageId: Long,
         onComplete: ((TranslateResult) -> Unit)? = null
     ) {
-        // 用 Thread 替代 Utils.threadPool，避免线程池问题导致崩溃
-        Thread {
+        if (!pendingMessages.add(messageId)) return  // 已有一条翻译任务在跑
+
+        getExecutor().execute {
             try {
                 val result = translateSync(text, sourceLang, targetLang, channelId, messageId)
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -142,7 +228,7 @@ class TranslateController(
                         // 翻译失败：清除加载占位符，恢复原文显示
                         translatedMessages.remove(messageId)
                         rerender(messageId)
-                        onShowToast("翻译失败: ${(result as TranslateResult.Error).errorText}", false)
+                        onShowToast(strings.toastTranslateFailed + (result as TranslateResult.Error).errorText, false)
                     }
                     onComplete?.invoke(result)
                 }
@@ -151,14 +237,16 @@ class TranslateController(
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     translatedMessages.remove(messageId)
                     rerender(messageId)
-                    onShowToast("翻译异常: ${e.message}", false)
+                    onShowToast(strings.toastTranslateError + (e.message ?: "Unknown"), false)
                 }
+            } finally {
+                pendingMessages.remove(messageId)
             }
-        }.start()
+        }
     }
 
     /**
-     * 翻译并在缓存命中时显示"翻译中…"占位。
+     * 翻译并在缓存命中时显示“翻译中...”占位符。
      */
     fun translateWithLoading(
         text: String,
@@ -167,7 +255,9 @@ class TranslateController(
         channelId: Long? = null,
         messageId: Long
     ) {
-        // 先存一个占位符，让 processMessageText 渲染"翻译中…"
+        if (pendingMessages.contains(messageId)) return
+
+        // 先存一个占位符，让 processMessageText 渲染“翻译中...”
         translatedMessages[messageId] = TranslateResult.Success(
             sourceLanguage = "",
             translatedLanguage = "",
@@ -210,5 +300,13 @@ class TranslateController(
                 list.forceRerenderMessage(messageId)
             }
         }
+    }
+
+    companion object {
+        private const val MAX_CACHE_SIZE = 300
+        private const val TRANSLATE_THREADS = 2
+        private const val ERROR_EMPTY_AFTER_CLEAN = "Nothing to translate after cleaning."
+        private const val ERROR_EMPTY_TRANSLATION = "Backend returned an empty translation."
+        private const val ERROR_BACKEND_EXCEPTION = "Translation backend error: "
     }
 }

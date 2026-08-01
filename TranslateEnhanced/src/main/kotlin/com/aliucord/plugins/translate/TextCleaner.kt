@@ -4,7 +4,11 @@ import com.aliucord.api.SettingsAPI
 
 object TextCleaner {
 
-    private val HTML_TAG_REGEX  = Regex("<[^>]*>")
+    // 只清理 Discord 常见的提及/表情/时间戳和真正的 HTML 标签，
+    // 避免误删普通文本中的尖括号表达式（如 "a < b > c"、"<3"）
+    private val HTML_TAG_REGEX = Regex(
+        "<(?:(?:@!?&?|#)\\d+|a?:\\w+:\\d+|t:\\d+[^>]*|/?[a-zA-Z][a-zA-Z0-9]*(?:\\s[^>]*)?)>"
+    )
     private val URL_REGEX       = Regex("https?://\\S+")
     private val EMOJI_REGEX     = Regex("[\\p{So}\\p{Sk}\\p{Sm}\\p{Sc}]+")
 

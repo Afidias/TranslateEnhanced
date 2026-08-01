@@ -144,7 +144,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         addView(divider(bgColor))
 
         // ── Text cleaning toggles ────────────────────────────────
-        addView(sectionLabel("Text cleaning", textColor))
+        addView(sectionLabel(strings.settingsCleaningLabel, textColor))
 
         addView(switchRow(strings.settingsCleanHtml, textColor).apply {
             isChecked = settings.getBool(SETTINGS_KEY_CLEAN_HTML, true)
@@ -167,7 +167,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             setOnCheckedChangeListener { _, v ->
                 settings.setBool(SETTINGS_KEY_DEBUG_MODE, v)
                 DebugLogger.setEnabled(v)
-                Utils.showToast(if (v) "Debug ON → ${DEBUG_LOG_PATH}" else "Debug OFF")
+                Utils.showToast(if (v) strings.settingsDebugOn + DEBUG_LOG_PATH else strings.settingsDebugOff)
             }
         })
 
@@ -177,7 +177,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
         addView(button(strings.settingsDebugClearLog, textColor, bgColor) {
             DebugLogger.clearLog()
-            Utils.showToast("Log cleared")
+            Utils.showToast(strings.settingsLogCleared)
         })
     }
 
@@ -215,7 +215,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                 }
             } catch (e: Exception) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Utils.showToast("Test failed: ${e.message}")
+                    Utils.showToast(strings.settingsTestError + e.message)
                 }
             }
         }.start()
@@ -245,7 +245,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                 }
             } catch (e: Exception) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    Utils.showToast("Failed to fetch models: ${e.message}")
+                    Utils.showToast(strings.settingsFetchModelsError + e.message)
                 }
             }
         }.start()
@@ -265,14 +265,14 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                 .setItems(models.toTypedArray()) { _, which ->
                     val selectedModel = models[which]
                     settings.setString(SETTINGS_KEY_LLM_MODEL, selectedModel)
-                    Utils.showToast("Model set to: $selectedModel")
+                    Utils.showToast(strings.settingsModelSet + selectedModel)
                     // 直接更新模型输入框，无需重建页面
                     modelInput?.setText(selectedModel)
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(strings.settingsCancel, null)
                 .show()
         } catch (e: Exception) {
-            Utils.showToast("Failed to show dialog: ${e.message}")
+            Utils.showToast(strings.settingsDialogError + e.message)
         }
     }
 
@@ -299,7 +299,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                         ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
                     langRow?.text = "➜  $name"
                 }
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(strings.settingsCancel, null)
                 .show()
         } catch (e: Exception) {
             Utils.showToast("Failed to show language picker: ${e.message}")

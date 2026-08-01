@@ -48,7 +48,7 @@ class Translate : Plugin() {
     override fun load(ctx: Context) {
         pluginIcon = ContextCompat.getDrawable(ctx, R.e.ic_locale_24dp)
         strings = ctx.getStrings()
-        controller = TranslateController(settings)
+        controller = TranslateController(settings, strings)
         autoManager = AutoTranslateManager(settings)
 
         // 初始化 debug 模式
@@ -63,7 +63,10 @@ class Translate : Plugin() {
         registerTranslateCommand()
     }
 
-    override fun stop(context: Context?) = patcher.unpatchAll()
+    override fun stop(context: Context?) {
+        patcher.unpatchAll()
+        controller.shutdown()
+    }
 
     // ── Patches ────────────────────────────────────────────────────
 
@@ -81,25 +84,35 @@ class Translate : Plugin() {
             arrayOf(Long::class.java, Long::class.java, Long::class.java),
             Hook { hookParam ->
                 val channelId = hookParam.args[0] as Long
-                val guildId   = hookParam.args[1] as Long
                 val messageId = hookParam.args[2] as Long
 
                 if (!autoManager.isEnabled(channelId)) return@Hook
                 if (autoManager.isPaused(channelId)) return@Hook
 
-                // 异步读取消息并翻译（用 Thread 替代 Utils.threadPool）
-                Thread {
+                // 已在翻译中或已有译文的消息跳过，避免重复翻译
+                if (controller.getCached(messageId) != null) return@Hook
+                if (!controller.beginTranslate(messageId)) return@Hook
+
+                // 异步读取消息并翻译（用插件自有线程池，避免每条消息新建线程）
+                controller.submit {
                     try {
                         val message = com.discord.stores.StoreStream
                             .getMessages()
                             .getMessage(channelId, messageId)
-                        val content = message?.content ?: return@Thread
-                        if (content.isBlank()) return@Thread
+                        val content = message?.content ?: return@submit
+                        if (content.isBlank()) return@submit
+
+                        // 清理后为空（例如只有表情的消息）直接跳过，不计数失败
+                        if (TextCleaner.clean(content, settings).isBlank()) return@submit
+
+                        // 跳过自己发送的消息
+                        val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()
+                        if (message?.author?.id == myId) return@submit
 
                         val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
                         // 语言检测：跳过目标语言的消息
-                        if (!LanguageDetector.shouldTranslate(content, targetLang)) return@Thread
+                        if (!LanguageDetector.shouldTranslate(content, targetLang)) return@submit
 
                         val result = controller.translateSync(
                             text = content,
@@ -126,7 +139,18 @@ class Translate : Plugin() {
                                 }
                             }
                         }
-                    } catch (_: Exception) { }
+                    } catch (e: Exception) {
+                        // 自动翻译线程中的异常也计入失败并记录，避免被静默吞掉
+                        DebugLogger.log("Auto translate exception: ${e.message}")
+                        val justPaused = autoManager.recordFailure(channelId)
+                        if (justPaused) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                Utils.showToast(strings.toastAutoPaused, true)
+                            }
+                        }
+                    } finally {
+                        controller.endTranslate(messageId)
+                    }
                 }
             }
         )
@@ -158,9 +182,9 @@ class Translate : Plugin() {
 
                 val data = controller.getCached(id) ?: return@Hook
                 if (data.showingOriginal) return@Hook
-                // 源文本内容变更检测（编辑过的消息不再翻译旧内容）
+                // 源文本内容变更检测：消息被编辑后清除旧译文缓存，显示原文
                 if (data.sourceText != message.content) {
-                    // 源文本变了，清除缓存（不直接 remove 避免 concurrent modification）
+                    controller.invalidate(id)
                     return@Hook
                 }
 
@@ -254,13 +278,22 @@ class Translate : Plugin() {
                     hookParam.thisObject as WidgetChatListActions
                 )
                 if (channelId != 0L) {
-                    val autoLabel = if (autoManager.isEnabled(channelId))
-                        strings.actionShowOriginal else strings.actionToggleAuto
+                    val autoLabel = when {
+                        autoManager.isPaused(channelId) -> strings.actionResumeAuto
+                        autoManager.isEnabled(channelId) -> strings.actionDisableAuto
+                        else -> strings.actionToggleAuto
+                    }
 
                     linearLayout.addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
                         text = autoLabel
                         setOnClickListener {
-                            val nowOn = autoManager.toggle(channelId)
+                            // 暂停中的频道先恢复，而不是把它关掉
+                            val nowOn = if (autoManager.isPaused(channelId)) {
+                                autoManager.resume(channelId)
+                                true
+                            } else {
+                                autoManager.toggle(channelId)
+                            }
                             Utils.showToast(
                                 if (nowOn) strings.toastAutoResumed else strings.toastAutoPaused
                             )

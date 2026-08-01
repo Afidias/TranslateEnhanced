@@ -16,7 +16,8 @@ fun WidgetChatList.forceRerenderMessage(messageId: Long) {
             entry is MessageEntry && entry.message.id == messageId
         }
         if (idx != -1) adapter.notifyItemChanged(idx)
-    } catch (_: Exception) {
-        // 如果内部 API 变动，静默忽略，不影响主流程
+    } catch (e: Exception) {
+        // 如果内部 API 变动，静默忽略，不影响主流程；记录日志便于排查
+        DebugLogger.log("forceRerenderMessage failed: ${e.message}")
     }
 }

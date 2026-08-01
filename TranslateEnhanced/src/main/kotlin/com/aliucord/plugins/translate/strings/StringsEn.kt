@@ -6,11 +6,15 @@ object StringsEn : IStrings {
     override val actionTranslate      = "Translate message"
     override val actionShowOriginal   = "Show original"
     override val actionToggleAuto     = "Auto translate this channel"
+    override val actionDisableAuto    = "Disable auto translate"
+    override val actionResumeAuto     = "Resume auto translate"
 
     override val toastTranslated      = "Message translated"
     override val toastAutoPaused      = "Auto translate paused due to failures. Tap to resume."
     override val toastAutoResumed     = "Auto translate resumed"
     override val toastBackendFallback = "LLM failed, falling back to Google Translate"
+    override val toastTranslateFailed = "Translation failed: "
+    override val toastTranslateError  = "Translation error: "
 
     override val settingsTitle          = "Translate Enhanced"
     override val settingsBackendLabel   = "Translation backend"
@@ -25,6 +29,8 @@ object StringsEn : IStrings {
     override val settingsCleanUrl       = "Clean URLs before translating"
     override val settingsCleanEmoji     = "Clean emoji before translating"
     override val settingsSupportedLanguages = "Supported languages:"
+    override val settingsCleaningLabel  = "Text cleaning"
+    override val settingsCancel         = "Cancel"
 
     override val loadingText            = "Translating..."
 
@@ -38,10 +44,17 @@ object StringsEn : IStrings {
     override val settingsModelsFetched  = "Models fetched successfully"
     override val settingsNoModelsFound  = "No models found"
     override val settingsSelectModel    = "Select a model"
+    override val settingsTestError      = "Test failed: "
+    override val settingsFetchModelsError = "Failed to fetch models: "
+    override val settingsDialogError    = "Failed to show dialog: "
+    override val settingsModelSet       = "Model set to: "
 
     // Debug mode
     override val settingsDebugMode      = "Debug Mode"
     override val settingsDebugModeDesc  = "Log translation details to file"
     override val settingsDebugClearLog  = "Clear Debug Log"
     override val settingsDebugLogPath   = "Log file: /sdcard/Aliucord/translate_debug.log"
+    override val settingsDebugOn        = "Debug ON \u2192 "
+    override val settingsDebugOff       = "Debug OFF"
+    override val settingsLogCleared     = "Log cleared"
 }

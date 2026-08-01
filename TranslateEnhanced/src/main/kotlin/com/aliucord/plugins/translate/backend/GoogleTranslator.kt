@@ -23,10 +23,18 @@ class GoogleTranslator : TranslatorBackend {
             append("q", text)
         }.toString()
 
-        val response = Http.Request(url, "GET").apply {
-            setHeader("Content-Type", "application/json")
-            setHeader("User-Agent", USER_AGENT)
-        }.execute()
+        val response = try {
+            Http.Request(url, "GET").apply {
+                setHeader("Content-Type", "application/json")
+                setHeader("User-Agent", USER_AGENT)
+                // 20 秒超时，避免请求长时间挂起
+                setRequestTimeout(20_000)
+            }.execute()
+        } catch (e: Exception) {
+            return TranslateResult.Error(
+                errorText = "Google Translate request failed: ${e.message}"
+            )
+        }
 
         if (!response.ok()) {
             return TranslateResult.Error(
@@ -38,13 +46,21 @@ class GoogleTranslator : TranslatorBackend {
             )
         }
 
-        val json   = JSONArray(response.text())
-        val parts  = json.getJSONArray(0)
-        val translated = buildString {
-            for (i in 0 until parts.length()) {
-                append(parts.getJSONArray(i).getString(0))
-            }
-        }.let { TranslateUnescaper.unescape(it) }
+        val json: JSONArray
+        val translated: String
+        try {
+            json = JSONArray(response.text())
+            val parts = json.getJSONArray(0)
+            translated = buildString {
+                for (i in 0 until parts.length()) {
+                    append(parts.getJSONArray(i).getString(0))
+                }
+            }.let { TranslateUnescaper.unescape(it) }
+        } catch (e: Exception) {
+            return TranslateResult.Error(
+                errorText = "Google Translate response parse error: ${e.message}"
+            )
+        }
 
         return TranslateResult.Success(
             sourceLanguage    = json.optString(2, from),

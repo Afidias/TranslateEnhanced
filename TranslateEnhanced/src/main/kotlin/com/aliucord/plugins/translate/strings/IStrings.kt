@@ -6,11 +6,15 @@ interface IStrings {
     val actionTranslate: String
     val actionShowOriginal: String
     val actionToggleAuto: String
+    val actionDisableAuto: String
+    val actionResumeAuto: String
 
     val toastTranslated: String
     val toastAutoPaused: String
     val toastAutoResumed: String
     val toastBackendFallback: String
+    val toastTranslateFailed: String
+    val toastTranslateError: String
 
     val settingsTitle: String
     val settingsBackendLabel: String
@@ -25,6 +29,8 @@ interface IStrings {
     val settingsCleanUrl: String
     val settingsCleanEmoji: String
     val settingsSupportedLanguages: String
+    val settingsCleaningLabel: String
+    val settingsCancel: String
 
     val loadingText: String
 
@@ -38,10 +44,17 @@ interface IStrings {
     val settingsModelsFetched: String
     val settingsNoModelsFound: String
     val settingsSelectModel: String
+    val settingsTestError: String
+    val settingsFetchModelsError: String
+    val settingsDialogError: String
+    val settingsModelSet: String
 
     // Debug mode
     val settingsDebugMode: String
     val settingsDebugModeDesc: String
     val settingsDebugClearLog: String
     val settingsDebugLogPath: String
+    val settingsDebugOn: String
+    val settingsDebugOff: String
+    val settingsLogCleared: String
 }

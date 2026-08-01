@@ -111,7 +111,11 @@ class LLMTranslator(
                     DebugLogger.log("[LLM] Attempt ${attempt + 1} error body: ${errBody.take(300)}")
                     lastStatusCode = statusCode
                     lastErrorText = errBody.take(300)
-                    if (attempt == 0) continue
+                    if (attempt == 0) {
+                        // 短暂等待后重试
+                        try { Thread.sleep(1000) } catch (ie: InterruptedException) { }
+                        continue
+                    }
                     return TranslateResult.Error(
                         errorCode = lastStatusCode,
                         errorText = "LLM API request failed ($statusCode): $lastErrorText"
@@ -126,6 +130,11 @@ class LLMTranslator(
                     .getJSONObject("message")
                     .getString("content")
                     .trim()
+
+                if (content.isEmpty()) {
+                    DebugLogger.log("[LLM] Empty response content, treating as error")
+                    return TranslateResult.Error(errorText = "LLM returned an empty response.")
+                }
 
                 DebugLogger.log("[LLM] Parsed content: $content")
                 DebugLogger.log("[LLM] Same as input: ${content == text}")

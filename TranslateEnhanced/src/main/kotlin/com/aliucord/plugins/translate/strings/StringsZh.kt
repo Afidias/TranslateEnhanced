@@ -6,11 +6,15 @@ object StringsZh : IStrings {
     override val actionTranslate      = "翻译此消息"
     override val actionShowOriginal   = "显示原文"
     override val actionToggleAuto     = "自动翻译此频道"
+    override val actionDisableAuto    = "关闭自动翻译"
+    override val actionResumeAuto     = "恢复自动翻译"
 
     override val toastTranslated      = "消息已翻译"
     override val toastAutoPaused      = "翻译失败次数过多，已暂停自动翻译。点击恢复。"
     override val toastAutoResumed     = "已恢复自动翻译"
     override val toastBackendFallback = "大模型翻译失败，已自动切换到 Google Translate"
+    override val toastTranslateFailed = "翻译失败："
+    override val toastTranslateError  = "翻译异常："
 
     override val settingsTitle          = "增强翻译"
     override val settingsBackendLabel   = "翻译后端"
@@ -25,6 +29,8 @@ object StringsZh : IStrings {
     override val settingsCleanUrl       = "翻译前去除 URL 链接"
     override val settingsCleanEmoji     = "翻译前去除 Emoji 表情"
     override val settingsSupportedLanguages = "支持的语言："
+    override val settingsCleaningLabel  = "文本清理"
+    override val settingsCancel         = "取消"
 
     override val loadingText            = "翻译中..."
 
@@ -38,10 +44,17 @@ object StringsZh : IStrings {
     override val settingsModelsFetched  = "模型列表获取成功"
     override val settingsNoModelsFound  = "未找到可用模型"
     override val settingsSelectModel    = "选择模型"
+    override val settingsTestError      = "测试失败："
+    override val settingsFetchModelsError = "获取模型失败："
+    override val settingsDialogError    = "显示对话框失败："
+    override val settingsModelSet       = "模型已设置为："
 
     // Debug mode
     override val settingsDebugMode      = "调试模式"
     override val settingsDebugModeDesc  = "记录翻译详情到文件"
     override val settingsDebugClearLog  = "清除调试日志"
     override val settingsDebugLogPath   = "日志文件：/sdcard/Aliucord/translate_debug.log"
+    override val settingsDebugOn        = "调试已开启，日志："
+    override val settingsDebugOff       = "调试已关闭"
+    override val settingsLogCleared     = "日志已清除"
 }

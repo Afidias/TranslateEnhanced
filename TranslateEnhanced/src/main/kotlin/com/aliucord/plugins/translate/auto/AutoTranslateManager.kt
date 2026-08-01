@@ -1,6 +1,7 @@
 package com.aliucord.plugins.translate.auto
 
 import com.aliucord.api.SettingsAPI
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 管理自动翻译的状态：按频道开关、失败计数、暂停逻辑。
@@ -9,11 +10,12 @@ import com.aliucord.api.SettingsAPI
  *   autoTranslate_enabled_{channelId}  -> Boolean
  *
  * 运行时失败计数在内存中，不持久化。
+ * 失败计数与暂停集合使用并发容器，可在后台线程安全访问。
  */
 class AutoTranslateManager(private val settings: SettingsAPI) {
 
-    private val failCounts = mutableMapOf<Long, Int>()
-    private val pausedChannels = mutableSetOf<Long>()
+    private val failCounts = ConcurrentHashMap<Long, Int>()
+    private val pausedChannels = ConcurrentHashMap.newKeySet<Long>()
 
     /**
      * 用户是否对该频道开启了自动翻译。

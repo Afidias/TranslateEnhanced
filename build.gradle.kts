@@ -35,8 +35,8 @@ subprojects {
 
     aliucord {
         author("TranslateEnhanced", 0L)
-        updateUrl.set("https://raw.githubusercontent.com/${System.getenv("GITHUB_REPOSITORY") ?: "owner/repo"}/builds/updater.json")
-        buildUrl.set("https://raw.githubusercontent.com/${System.getenv("GITHUB_REPOSITORY") ?: "owner/repo"}/builds/%s.zip")
+        updateUrl.set("https://raw.githubusercontent.com/${System.getenv("GITHUB_REPOSITORY") ?: "kizfive/TranslateEnhanced"}/builds/updater.json")
+        buildUrl.set("https://raw.githubusercontent.com/${System.getenv("GITHUB_REPOSITORY") ?: "kizfive/TranslateEnhanced"}/builds/%s.zip")
         minimumDiscordVersion.set(126021)
     }
 
