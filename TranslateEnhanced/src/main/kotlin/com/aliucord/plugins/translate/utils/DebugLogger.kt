@@ -71,6 +71,21 @@ object DebugLogger {
         log("=== Translation End ===")
     }
 
+    /**
+     * 无条件记录崩溃堆栈（不受 debug 开关影响），用于定位无法复现的环境问题。
+     */
+    fun logCrash(tag: String, e: Throwable) {
+        try {
+            val file = File(CRASH_LOG_PATH)
+            file.parentFile?.mkdirs()
+            FileWriter(file, true).use { writer ->
+                writer.append("[$tag] ${e.javaClass.simpleName}: ${e.message}\n")
+                e.stackTrace?.take(12)?.forEach { writer.append("    at $it\n") }
+                writer.append("\n")
+            }
+        } catch (_: Exception) { }
+    }
+
     fun clearLog() {
         try {
             val file = File(DEBUG_LOG_PATH)

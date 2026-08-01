@@ -234,6 +234,7 @@ class TranslateController(
                 // 整个翻译流程崩溃：清除占位符，显示错误
                 DebugLogger.log("translateAsync exception: ${e.message}")
                 DebugLogger.log("at: " + (e.stackTrace?.take(8)?.joinToString(" <- ") { it.toString() } ?: "?"))
+                DebugLogger.logCrash("translateAsync", e)
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     translatedMessages.remove(messageId)
                     rerender(messageId)
@@ -243,7 +244,8 @@ class TranslateController(
                     val loc = caller?.let { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
                         ?: top?.let { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
                         ?: "?"
-                    onShowToast(strings.toastTranslateError + (e.message ?: "Unknown") + " @" + loc, false)
+                    // 定位信息放最前面，避免被 Toast 截断
+                    onShowToast(strings.toastTranslateError + "@" + loc, false)
                 }
             } finally {
                 pendingMessages.remove(messageId)

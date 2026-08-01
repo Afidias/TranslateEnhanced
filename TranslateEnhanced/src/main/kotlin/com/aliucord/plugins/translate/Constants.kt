@@ -22,3 +22,4 @@ internal const val SETTINGS_KEY_DEBUG_MODE        = "debugMode"
 internal const val CMD_NAME = "translate"
 
 internal const val DEBUG_LOG_PATH = "/sdcard/Aliucord/translate_debug.log"
+internal const val CRASH_LOG_PATH = "/sdcard/Aliucord/translate_crash.log"
