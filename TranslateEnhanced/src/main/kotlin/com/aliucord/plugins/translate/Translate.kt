@@ -20,6 +20,7 @@ import com.aliucord.plugins.translate.auto.LanguageDetector
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.getStrings
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.safeIsBlank
 import com.aliucord.plugins.translate.utils.toRealString
 import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.api.commands.ApplicationCommandType
@@ -103,10 +104,10 @@ class Translate : Plugin() {
                         val content = message?.content ?: return@submit
                         // 防御：混淆后的消息内容可能不是真实 String，先转换再做字符串操作
                         val safeContent = content.toRealString()
-                        if (safeContent.isBlank()) return@submit
+                        if (safeIsBlank(safeContent)) return@submit
 
                         // 清理后为空（例如只有表情的消息）直接跳过，不计数失败
-                        if (TextCleaner.clean(safeContent, settings).isBlank()) return@submit
+                        if (safeIsBlank(TextCleaner.clean(safeContent, settings))) return@submit
 
                         // 跳过自己发送的消息
                         val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()

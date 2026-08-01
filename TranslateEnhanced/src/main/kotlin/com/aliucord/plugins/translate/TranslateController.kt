@@ -9,6 +9,7 @@ import com.aliucord.plugins.translate.strings.IStrings
 import com.aliucord.plugins.translate.utils.DebugLogger
 import com.aliucord.plugins.translate.utils.forceRerenderMessage
 import com.aliucord.plugins.translate.utils.safeGetString
+import com.aliucord.plugins.translate.utils.safeIsBlank
 import com.aliucord.plugins.translate.utils.toRealString
 import com.discord.widgets.chat.list.WidgetChatList
 import java.util.Collections
@@ -127,30 +128,32 @@ class TranslateController(
         // 防御：运行时消息内容可能是混淆类型而非真实 String（d0.d0.b），
         // 用 CharSequence 反射提取真实 String 后再做任何字符串操作
         val safeText = text.toRealString()
+        val safeSource = sourceLang?.toRealString()
+        val safeTarget = targetLang?.toRealString()
         val cleanedText = TextCleaner.clean(safeText, settings)
-        val target = targetLang ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+        val target = safeTarget ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
         val backend = resolveBackend()
         val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
 
-        if (cleanedText.isBlank()) {
+        if (safeIsBlank(cleanedText)) {
             DebugLogger.log("translateSync: nothing to translate after cleaning")
             return TranslateResult.Error(errorText = ERROR_EMPTY_AFTER_CLEAN)
         }
 
-        DebugLogger.log("translateSync called: backend=$backendName, target=$target, sourceLang=${sourceLang ?: "auto"}")
-        DebugLogger.log("Original text: ${safeText.take(100)}")
-        DebugLogger.log("Cleaned text: ${cleanedText.take(100)}")
+        DebugLogger.log("translateSync called: backend=$backendName, target=$target, sourceLang=${safeSource ?: "auto"}")
+        DebugLogger.log("Original text: " + safeText.substring(0, Math.min(100, safeText.length)))
+        DebugLogger.log("Cleaned text: " + cleanedText.substring(0, Math.min(100, cleanedText.length)))
 
         var result: TranslateResult
         try {
-            result = backend.translate(cleanedText, sourceLang, target)
+            result = backend.translate(cleanedText, safeSource, target)
         } catch (e: Exception) {
             DebugLogger.log("Backend threw exception: ${e.message}")
             result = TranslateResult.Error(errorText = ERROR_BACKEND_EXCEPTION + (e.message ?: "Unknown"))
         }
 
         // 空译文视为失败，避免消息永远卡在“翻译中...”
-        if (result is TranslateResult.Success && result.translatedText.isBlank()) {
+        if (result is TranslateResult.Success && safeIsBlank(result.translatedText)) {
             DebugLogger.log("Backend returned an empty translation")
             result = TranslateResult.Error(errorText = ERROR_EMPTY_TRANSLATION)
         }
@@ -160,8 +163,8 @@ class TranslateController(
             DebugLogger.log("LLM failed, falling back to Google: ${(result as TranslateResult.Error).errorText}")
             try {
                 val fallback = GoogleTranslator()
-                val fbResult = fallback.translate(cleanedText, sourceLang, target)
-                if (fbResult is TranslateResult.Success && fbResult.translatedText.isNotBlank()) {
+                val fbResult = fallback.translate(cleanedText, safeSource, target)
+                if (fbResult is TranslateResult.Success && !safeIsBlank(fbResult.translatedText)) {
                     result = fbResult
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         onShowToast(strings.toastBackendFallback, false)
@@ -178,7 +181,7 @@ class TranslateController(
                 DebugLogger.logTranslation(
                     sourceText = safeText,
                     cleanedText = cleanedText,
-                    sourceLang = sourceLang,
+                    sourceLang = safeSource,
                     targetLang = target,
                     backend = backendName,
                     resultType = "Success",
@@ -189,7 +192,7 @@ class TranslateController(
                 DebugLogger.logTranslation(
                     sourceText = safeText,
                     cleanedText = cleanedText,
-                    sourceLang = sourceLang,
+                    sourceLang = safeSource,
                     targetLang = target,
                     backend = backendName,
                     resultType = "Error",

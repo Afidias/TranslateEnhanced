@@ -26,7 +26,8 @@ fun Context.getStrings(): IStrings =
  */
 fun Any?.toRealString(): String {
     if (this == null) return ""
-    return try {
+    val inputClass = this.javaClass.name
+    val result = try {
         val cs = java.lang.CharSequence::class.java
         val lengthMethod = cs.getMethod("length")
         val charAtMethod = cs.getMethod("charAt", Integer.TYPE)
@@ -52,6 +53,13 @@ fun Any?.toRealString(): String {
             ""
         }
     }
+    if (inputClass != "java.lang.String") {
+        DebugLogger.logCrash(
+            "toRealString-class",
+            ClassCastException("input: " + inputClass + ", output: " + result.javaClass.name)
+        )
+    }
+    return result
 }
 
 /**
@@ -67,6 +75,50 @@ fun Any?.toRealString(): String {
  *
  * 只有反射调用 toString() R8 无法优化。
  */
+/**
+ * 安全的空白判断：不调用应用侧 Kotlin 标准库的 CharSequence 扩展（isBlank 等）。
+ *
+ * 应用内被 R8 处理过的 isBlank 对插件传入的值会触发 IntIterator 强转崩溃，
+ * 因此这里只用：
+ * - 反射 String.isInstance（R8 无法优化，按运行时类型判断）
+ * - String 成员 length/charAt（框架类，行为固定）
+ * - Character.isWhitespace（框架 API）
+ */
+fun safeIsBlank(value: Any?): Boolean {
+    return try {
+        if (value == null) {
+            true
+        } else if (!String::class.java.isInstance(value)) {
+            DebugLogger.logCrash(
+                "safeIsBlank-notString",
+                ClassCastException("value class: " + value.javaClass.name)
+            )
+            true
+        } else {
+            val s = value as String
+            val n = s.length
+            if (n == 0) {
+                true
+            } else {
+                var blank = true
+                var i = 0
+                while (i < n) {
+                    if (!Character.isWhitespace(s[i])) {
+                        blank = false
+                        break
+                    }
+                    i++
+                }
+                blank
+            }
+        }
+    } catch (e: Throwable) {
+        // 任何意外都按“空”处理并记录，绝不把崩溃抛给调用方
+        DebugLogger.logCrash("safeIsBlank-crash", e)
+        true
+    }
+}
+
 fun SettingsAPI.safeGetString(key: String, default: String = ""): String {
     return try {
         val raw = getString(key, default)

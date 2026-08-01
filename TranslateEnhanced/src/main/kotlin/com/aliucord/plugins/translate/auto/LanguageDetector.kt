@@ -1,5 +1,6 @@
 package com.aliucord.plugins.translate.auto
 
+import com.aliucord.plugins.translate.utils.safeIsBlank
 import java.util.Locale
 
 /**
@@ -24,7 +25,7 @@ object LanguageDetector {
      * 中文会区分简繁：简体 -> zh-CN，繁体 -> zh-TW。
      */
     fun detect(text: String): String? {
-        if (text.isBlank()) return null
+        if (safeIsBlank(text)) return null
         val stripped = text.replace(Regex("\\s+"), "")
 
         var cjk = 0; var latin = 0; var cyrillic = 0
