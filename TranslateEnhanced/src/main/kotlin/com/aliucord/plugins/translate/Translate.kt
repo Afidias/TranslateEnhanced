@@ -142,6 +142,7 @@ class Translate : Plugin() {
                     } catch (e: Exception) {
                         // 自动翻译线程中的异常也计入失败并记录，避免被静默吞掉
                         DebugLogger.log("Auto translate exception: ${e.message}")
+                        DebugLogger.log("at: " + (e.stackTrace?.take(8)?.joinToString(" <- ") { it.toString() } ?: "?"))
                         val justPaused = autoManager.recordFailure(channelId)
                         if (justPaused) {
                             android.os.Handler(android.os.Looper.getMainLooper()).post {

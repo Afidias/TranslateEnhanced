@@ -232,10 +232,18 @@ class TranslateController(
                 }
             } catch (e: Exception) {
                 // 整个翻译流程崩溃：清除占位符，显示错误
+                DebugLogger.log("translateAsync exception: ${e.message}")
+                DebugLogger.log("at: " + (e.stackTrace?.take(8)?.joinToString(" <- ") { it.toString() } ?: "?"))
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     translatedMessages.remove(messageId)
                     rerender(messageId)
-                    onShowToast(strings.toastTranslateError + (e.message ?: "Unknown"), false)
+                    val frames = e.stackTrace
+                    val caller = frames?.firstOrNull { it.className.startsWith("com.aliucord.plugins.translate") }
+                    val top = frames?.firstOrNull()
+                    val loc = caller?.let { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
+                        ?: top?.let { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
+                        ?: "?"
+                    onShowToast(strings.toastTranslateError + (e.message ?: "Unknown") + " @" + loc, false)
                 }
             } finally {
                 pendingMessages.remove(messageId)
@@ -274,20 +282,25 @@ class TranslateController(
         } ?: false
 
     private fun resolveBackend(): TranslatorBackend {
-        val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
-        return if (choice == "llm") {
-            // 直接传 getString() 原始返回值给 LLMTranslator
-            // LLMTranslator 用 Any 接收 + String.format 转换，R8 无法优化
-            LLMTranslator(
-                baseUrl  = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "") as Any,
-                apiKey   = settings.getString(SETTINGS_KEY_LLM_API_KEY, "") as Any,
-                model    = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini") as Any,
-                systemPrompt = settings.getString(
-                    SETTINGS_KEY_LLM_SYSTEM_PROMPT,
-                    LLMTranslator.DEFAULT_SYSTEM_PROMPT
-                ) as Any
-            )
-        } else {
+        return try {
+            val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
+            if (choice == "llm") {
+                // 直接传 getString() 原始返回值给 LLMTranslator
+                // LLMTranslator 用 Any 接收 + String.format 转换，R8 无法优化
+                LLMTranslator(
+                    baseUrl  = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "") as Any,
+                    apiKey   = settings.getString(SETTINGS_KEY_LLM_API_KEY, "") as Any,
+                    model    = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini") as Any,
+                    systemPrompt = settings.getString(
+                        SETTINGS_KEY_LLM_SYSTEM_PROMPT,
+                        LLMTranslator.DEFAULT_SYSTEM_PROMPT
+                    ) as Any
+                )
+            } else {
+                GoogleTranslator()
+            }
+        } catch (e: Exception) {
+            DebugLogger.log("resolveBackend failed, falling back to Google: ${e.message}")
             GoogleTranslator()
         }
     }
