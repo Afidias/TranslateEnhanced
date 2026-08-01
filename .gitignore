@@ -1,0 +1,17 @@
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.zip
+# 自动推送工具的临时产物
+batch_*.json
+files.json
+push_all.json
+push_params.json
