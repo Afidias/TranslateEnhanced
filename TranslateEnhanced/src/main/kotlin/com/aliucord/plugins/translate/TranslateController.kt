@@ -123,7 +123,10 @@ class TranslateController(
         channelId: Long? = null,
         messageId: Long? = null
     ): TranslateResult {
-        val cleanedText = TextCleaner.clean(text, settings)
+        // 防御：运行时消息内容可能是混淆类型而非真实 String（d0.d0.b），
+        // String.format 强制转换后再做任何字符串操作
+        val safeText = String.format("%s", text)
+        val cleanedText = TextCleaner.clean(safeText, settings)
         val target = targetLang ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
         val backend = resolveBackend()
         val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
@@ -134,7 +137,7 @@ class TranslateController(
         }
 
         DebugLogger.log("translateSync called: backend=$backendName, target=$target, sourceLang=${sourceLang ?: "auto"}")
-        DebugLogger.log("Original text: ${text.take(100)}")
+        DebugLogger.log("Original text: ${safeText.take(100)}")
         DebugLogger.log("Cleaned text: ${cleanedText.take(100)}")
 
         var result: TranslateResult
@@ -172,7 +175,7 @@ class TranslateController(
         when (result) {
             is TranslateResult.Success -> {
                 DebugLogger.logTranslation(
-                    sourceText = text,
+                    sourceText = safeText,
                     cleanedText = cleanedText,
                     sourceLang = sourceLang,
                     targetLang = target,
@@ -183,7 +186,7 @@ class TranslateController(
             }
             is TranslateResult.Error -> {
                 DebugLogger.logTranslation(
-                    sourceText = text,
+                    sourceText = safeText,
                     cleanedText = cleanedText,
                     sourceLang = sourceLang,
                     targetLang = target,
@@ -197,7 +200,7 @@ class TranslateController(
 
         // 成功时缓存；sourceText 保存原始文本（未清理），供消息编辑检测使用
         if (result is TranslateResult.Success && messageId != null) {
-            translatedMessages[messageId] = result.copy(sourceText = text)
+            translatedMessages[messageId] = result.copy(sourceText = safeText)
         }
 
         return result
@@ -265,17 +268,20 @@ class TranslateController(
     ) {
         if (pendingMessages.contains(messageId)) return
 
+        // 防御转换：兼容运行时混淆类型
+        val safeText = String.format("%s", text)
+
         // 先存一个占位符，让 processMessageText 渲染“翻译中...”
         translatedMessages[messageId] = TranslateResult.Success(
             sourceLanguage = "",
             translatedLanguage = "",
-            sourceText = text,
+            sourceText = safeText,
             translatedText = "",
             showingOriginal = false
         )
         rerender(messageId)
 
-        translateAsync(text, sourceLang, targetLang, channelId, messageId)
+        translateAsync(safeText, sourceLang, targetLang, channelId, messageId)
     }
 
     fun isLoading(messageId: Long): Boolean =

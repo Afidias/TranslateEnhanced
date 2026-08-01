@@ -100,10 +100,12 @@ class Translate : Plugin() {
                             .getMessages()
                             .getMessage(channelId, messageId)
                         val content = message?.content ?: return@submit
-                        if (content.isBlank()) return@submit
+                        // 防御：混淆后的消息内容可能不是真实 String，先转换再做字符串操作
+                        val safeContent = String.format("%s", content)
+                        if (safeContent.isBlank()) return@submit
 
                         // 清理后为空（例如只有表情的消息）直接跳过，不计数失败
-                        if (TextCleaner.clean(content, settings).isBlank()) return@submit
+                        if (TextCleaner.clean(safeContent, settings).isBlank()) return@submit
 
                         // 跳过自己发送的消息
                         val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()
@@ -112,10 +114,10 @@ class Translate : Plugin() {
                         val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
                         // 语言检测：跳过目标语言的消息
-                        if (!LanguageDetector.shouldTranslate(content, targetLang)) return@submit
+                        if (!LanguageDetector.shouldTranslate(safeContent, targetLang)) return@submit
 
                         val result = controller.translateSync(
-                            text = content,
+                            text = safeContent,
                             targetLang = targetLang,
                             channelId = channelId,
                             messageId = messageId
@@ -185,7 +187,8 @@ class Translate : Plugin() {
                 val data = controller.getCached(id) ?: return@Hook
                 if (data.showingOriginal) return@Hook
                 // 源文本内容变更检测：消息被编辑后清除旧译文缓存，显示原文
-                if (data.sourceText != message.content) {
+                // 两侧都转换（message.content 运行时可能是混淆类型）
+                if (data.sourceText != String.format("%s", message.content)) {
                     controller.invalidate(id)
                     return@Hook
                 }
