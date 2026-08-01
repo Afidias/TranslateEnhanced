@@ -84,17 +84,15 @@ class TranslateController(
     }
 
     private fun getExecutor(): ExecutorService {
-        var e = executor
-        if (e == null || e.isShutdown) {
-            synchronized(this) {
-                e = executor
-                if (e == null || e.isShutdown) {
-                    e = Executors.newFixedThreadPool(TRANSLATE_THREADS)
-                    executor = e
-                }
-            }
+        val existing = executor
+        if (existing != null && !existing.isShutdown) return existing
+        synchronized(this) {
+            val current = executor
+            if (current != null && !current.isShutdown) return current
+            val created = Executors.newFixedThreadPool(TRANSLATE_THREADS)
+            executor = created
+            return created
         }
-        return e!!
     }
 
     /**
