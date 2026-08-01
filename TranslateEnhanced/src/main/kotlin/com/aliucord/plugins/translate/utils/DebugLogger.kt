@@ -1,5 +1,6 @@
 package com.aliucord.plugins.translate.utils
 
+import com.aliucord.plugins.translate.CRASH_LOG_PATH
 import com.aliucord.plugins.translate.DEBUG_LOG_PATH
 import java.io.File
 import java.io.FileWriter
@@ -79,8 +80,17 @@ object DebugLogger {
             val file = File(CRASH_LOG_PATH)
             file.parentFile?.mkdirs()
             FileWriter(file, true).use { writer ->
-                writer.append("[$tag] ${e.javaClass.simpleName}: ${e.message}\n")
-                e.stackTrace?.take(12)?.forEach { writer.append("    at $it\n") }
+                val line1 = "[$tag] " + (e.javaClass.simpleName) + ": " + (e.message) + "\n"
+                writer.append(line1)
+                val stack = e.stackTrace
+                if (stack != null) {
+                    val limit = Math.min(stack.size, 12)
+                    var i = 0
+                    while (i < limit) {
+                        writer.append("    at " + stack[i].toString() + "\n")
+                        i++
+                    }
+                }
                 writer.append("\n")
             }
         } catch (_: Exception) { }
