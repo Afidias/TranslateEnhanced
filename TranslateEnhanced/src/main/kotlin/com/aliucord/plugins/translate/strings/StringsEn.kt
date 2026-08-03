@@ -13,6 +13,7 @@ object StringsEn : IStrings {
     override val toastTranslated      = "Message translated"
     override val toastAutoPaused      = "Auto translate paused due to failures. Tap to resume."
     override val toastAutoResumed     = "Auto translate resumed"
+    override val toastAutoDisabled    = "Auto translate disabled"
     override val toastBackendFallback = "LLM failed, falling back to Google Translate"
     override val toastTranslateFailed = "Translation failed: "
     override val toastTranslateError  = "Translation error: "

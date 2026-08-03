@@ -57,7 +57,22 @@ class Translate : Plugin() {
     override fun load(ctx: Context) {
         pluginIcon = ContextCompat.getDrawable(ctx, R.e.ic_locale_24dp)
         strings = ctx.getStrings()
-        controller = TranslateController(settings, strings)
+        controller = TranslateController(
+            settings,
+            strings,
+            onAutoResult = { channelId, _, success ->
+                if (success) {
+                    autoManager.recordSuccess(channelId)
+                } else {
+                    val justPaused = autoManager.recordFailure(channelId)
+                    if (justPaused) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            Utils.showToast(strings.toastAutoPaused, true)
+                        }
+                    }
+                }
+            }
+        )
         autoManager = AutoTranslateManager(settings)
 
         // 初始化 debug 模式
@@ -127,8 +142,9 @@ class Translate : Plugin() {
             return
         }
 
-        // 异步读取消息并翻译（用插件自有线程池，避免每条消息新建线程）
+        // 异步读取消息做前置检查，然后进入批量队列（由批量调度器统一请求 LLM）
         controller.submit {
+            var enqueued = false
             try {
                 val message = StoreStream.getMessages().getMessage(channelId, messageId)
                 val content = message?.content
@@ -144,7 +160,8 @@ class Translate : Plugin() {
                 }
 
                 // 清理后没有可翻译文本（例如只有表情/链接/提及的消息）直接跳过，不计数失败
-                if (!TextCleaner.clean(safeContent, settings).hasRealText) {
+                val cleaned = TextCleaner.clean(safeContent, settings)
+                if (!cleaned.hasRealText) {
                     DebugLogger.log("auto skip: no real text after cleaning ($messageId)")
                     return@submit
                 }
@@ -164,33 +181,21 @@ class Translate : Plugin() {
                     return@submit
                 }
 
-                val result = controller.translateSync(
-                    text = safeContent,
-                    targetLang = targetLang,
-                    channelId = channelId,
-                    messageId = messageId
+                // 入队等待批量合并（消息保持 pending，结果回来后统一释放）
+                controller.enqueueAutoTranslate(
+                    TranslateController.AutoBatchItem(
+                        messageId = messageId,
+                        channelId = channelId,
+                        original = safeContent,
+                        text = cleaned.text,
+                        groups = cleaned.groups,
+                        urls = cleaned.urls,
+                        targetLang = targetLang
+                    )
                 )
-
-                when (result) {
-                    is TranslateResult.Success -> {
-                        autoManager.recordSuccess(channelId)
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            chatList?.let { list ->
-                                list.forceRerenderMessage(messageId)
-                            }
-                        }
-                    }
-                    is TranslateResult.Error -> {
-                        val justPaused = autoManager.recordFailure(channelId)
-                        if (justPaused) {
-                            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                Utils.showToast(strings.toastAutoPaused, true)
-                            }
-                        }
-                    }
-                }
+                enqueued = true
             } catch (e: Exception) {
-                // 自动翻译线程中的异常也计入失败并记录，避免被静默吞掉
+                // 入队前的异常计入失败并记录，避免被静默吞掉
                 DebugLogger.log("Auto translate exception: ${e.message}")
                 DebugLogger.log("at: " + (e.stackTrace?.take(8)?.joinToString(" <- ") { it.toString() } ?: "?"))
                 DebugLogger.logCrash("auto", e)
@@ -201,7 +206,8 @@ class Translate : Plugin() {
                     }
                 }
             } finally {
-                controller.endTranslate(messageId)
+                // 已入队的消息由批量结果回调释放 pending；未入队的在这里释放
+                if (!enqueued) controller.endTranslate(messageId)
             }
         }
     }
@@ -502,7 +508,7 @@ class Translate : Plugin() {
                             // 开启/恢复时立即翻译当前已加载的历史消息
                             if (nowOn) translateChannelHistory(channelId)
                             Utils.showToast(
-                                if (nowOn) strings.toastAutoResumed else strings.toastAutoPaused
+                                if (nowOn) strings.toastAutoResumed else strings.toastAutoDisabled
                             )
                             (hookParam.thisObject as WidgetChatListActions).dismiss()
                         }

@@ -14,9 +14,12 @@ import com.aliucord.plugins.translate.utils.toRealString
 import com.discord.widgets.chat.list.WidgetChatList
 import java.util.Collections
 import java.util.LinkedHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 /**
  * 翻译控制器：调度后端、管理结果缓存、驱动 UI 刷新。
@@ -36,7 +39,8 @@ import java.util.concurrent.Executors
 class TranslateController(
     private val settings: SettingsAPI,
     private val strings: IStrings,
-    private val onShowToast: (String, Boolean) -> Unit = { msg, isLong -> Utils.showToast(msg, isLong) }
+    private val onShowToast: (String, Boolean) -> Unit = { msg, isLong -> Utils.showToast(msg, isLong) },
+    private val onAutoResult: (channelId: Long, messageId: Long, success: Boolean) -> Unit = { _, _, _ -> }
 ) {
     private val translatedMessages: MutableMap<Long, TranslateResult.Success> =
         Collections.synchronizedMap(
@@ -51,7 +55,25 @@ class TranslateController(
     @Volatile
     private var executor: ExecutorService? = null
 
+    /** 自动翻译批量队列：消息先合并，再一次性发给 LLM，降低请求并发。 */
+    private val autoBatchQueue = ConcurrentLinkedQueue<AutoBatchItem>()
+    @Volatile
+    private var batchFlushScheduled = false
+    @Volatile
+    private var batchScheduler: ScheduledExecutorService? = null
+
     private var chatList: WidgetChatList? = null
+
+    /** 自动翻译批量条目（清理后的文本 + 原始文本 + 还原所需数据）。 */
+    data class AutoBatchItem(
+        val messageId: Long,
+        val channelId: Long,
+        val original: String,
+        val text: String,
+        val groups: List<TextCleaner.PlaceholderGroup>,
+        val urls: List<String>,
+        val targetLang: String
+    )
 
     fun attachChatList(list: WidgetChatList) { chatList = list }
 
@@ -80,6 +102,10 @@ class TranslateController(
     fun shutdown() {
         executor?.shutdownNow()
         executor = null
+        batchScheduler?.shutdownNow()
+        batchScheduler = null
+        autoBatchQueue.clear()
+        batchFlushScheduled = false
         translatedMessages.clear()
         pendingMessages.clear()
         chatList = null
@@ -313,6 +339,152 @@ class TranslateController(
         translateAsync(safeText, sourceLang, targetLang, channelId, messageId, force = force)
     }
 
+    private fun getBatchScheduler(): ScheduledExecutorService {
+        val existing = batchScheduler
+        if (existing != null && !existing.isShutdown) return existing
+        synchronized(this) {
+            val current = batchScheduler
+            if (current != null && !current.isShutdown) return current
+            val created = Executors.newSingleThreadScheduledExecutor()
+            batchScheduler = created
+            return created
+        }
+    }
+
+    /**
+     * 自动翻译入队：消息先进入批量队列，延迟 [AUTO_BATCH_DELAY_MS] 后合并成一次 LLM 请求。
+     * 只有自动翻译路径使用；手动翻译保持单条即时。
+     */
+    fun enqueueAutoTranslate(item: AutoBatchItem) {
+        autoBatchQueue.add(item)
+        if (!batchFlushScheduled) {
+            batchFlushScheduled = true
+            try {
+                getBatchScheduler().schedule({
+                    batchFlushScheduled = false
+                    flushAutoBatch()
+                }, AUTO_BATCH_DELAY_MS, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                // 调度器不可用：立即单条处理，避免消息卡在队列
+                batchFlushScheduled = false
+                autoBatchQueue.remove(item)
+                finalizeAutoItem(item, TranslateResult.Error(errorText = "batch scheduler unavailable"))
+            }
+        }
+    }
+
+    private fun flushAutoBatch() {
+        if (autoBatchQueue.isEmpty()) return
+        val items = ArrayList<AutoBatchItem>()
+        while (items.size < AUTO_BATCH_MAX_ITEMS && !autoBatchQueue.isEmpty()) {
+            val item = autoBatchQueue.poll() ?: break
+            items.add(item)
+        }
+        if (items.isEmpty()) return
+        DebugLogger.log("auto batch: flushing ${items.size} messages")
+
+        val backend = try {
+            resolveBackend(false)
+        } catch (e: Exception) {
+            GoogleTranslator()
+        }
+
+        for ((targetLang, langItems) in items.groupBy { it.targetLang }) {
+            val normal = langItems.filter { it.text.length <= AUTO_BATCH_MAX_ITEM_CHARS }
+            val long = langItems.filter { it.text.length > AUTO_BATCH_MAX_ITEM_CHARS }
+
+            if (backend is LLMTranslator) {
+                if (normal.isNotEmpty()) {
+                    val results = backend.translateBatch(
+                        normal.mapIndexed { i, item -> i to item.text },
+                        null,
+                        targetLang
+                    )
+                    normal.forEachIndexed { i, item ->
+                        finalizeAutoItem(
+                            item,
+                            results[i] ?: TranslateResult.Error(errorText = "batch missing result")
+                        )
+                    }
+                }
+                // 超长消息不合并，单条走 LLM
+                long.forEach { item ->
+                    val r = try {
+                        backend.translate(item.text, null, targetLang)
+                    } catch (e: Exception) {
+                        TranslateResult.Error(errorText = "LLM request exception: ${e.message}")
+                    }
+                    finalizeAutoItem(item, r)
+                }
+            } else {
+                // Google 后端：逐条（与旧行为一致）
+                langItems.forEach { item ->
+                    val r = try {
+                        backend.translate(item.text, null, targetLang)
+                    } catch (e: Exception) {
+                        TranslateResult.Error(errorText = "Translation backend error: ${e.message}")
+                    }
+                    finalizeAutoItem(item, r)
+                }
+            }
+        }
+
+        // 一次 flush 最多处理 AUTO_BATCH_MAX_ITEMS 条；还有积压则安排下一次 flush
+        if (!autoBatchQueue.isEmpty() && !batchFlushScheduled) {
+            batchFlushScheduled = true
+            try {
+                getBatchScheduler().schedule({
+                    batchFlushScheduled = false
+                    flushAutoBatch()
+                }, AUTO_BATCH_DELAY_MS, TimeUnit.MILLISECONDS)
+            } catch (e: Exception) {
+                batchFlushScheduled = false
+            }
+        }
+    }
+
+    /**
+     * 批量结果收尾：还原占位符/链接、降级 Google、缓存、刷新 UI、记录成功/失败、释放 pending。
+     */
+    private fun finalizeAutoItem(item: AutoBatchItem, result: TranslateResult) {
+        var r = result
+        if (r is TranslateResult.Success) {
+            if (safeIsBlank(r.translatedText)) {
+                r = TranslateResult.Error(errorText = "Backend returned an empty translation.")
+            } else {
+                r = r.copy(translatedText = TextCleaner.restoreAll(r.translatedText, item.groups))
+                r = r.copy(translatedText = TextCleaner.ensureUrlsPresent(r.translatedText, item.urls))
+            }
+        }
+
+        // 降级 Google（与 translateSync 行为一致）
+        if (r is TranslateResult.Error) {
+            try {
+                val fb = GoogleTranslator().translate(item.text, null, item.targetLang)
+                if (fb is TranslateResult.Success && !safeIsBlank(fb.translatedText)) {
+                    r = fb.copy(translatedText = TextCleaner.restoreAll(fb.translatedText, item.groups))
+                    r = r.copy(translatedText = TextCleaner.ensureUrlsPresent(r.translatedText, item.urls))
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        onShowToast(strings.toastBackendFallback, false)
+                    }
+                }
+            } catch (e: Exception) {
+                DebugLogger.log("Auto Google fallback threw exception: ${e.message}")
+            }
+        }
+
+        if (r is TranslateResult.Success) {
+            translatedMessages[item.messageId] = r.copy(sourceText = item.original)
+            DebugLogger.log("auto batch item ok: msg=${item.messageId}")
+            rerender(item.messageId)
+            onAutoResult(item.channelId, item.messageId, true)
+        } else {
+            DebugLogger.log("auto batch item failed: msg=${item.messageId} err=${(r as TranslateResult.Error).errorText}")
+            onAutoResult(item.channelId, item.messageId, false)
+        }
+        endTranslate(item.messageId)
+    }
+
     fun isLoading(messageId: Long): Boolean =
         translatedMessages[messageId]?.let {
             it.translatedText.isEmpty() && !it.showingOriginal
@@ -354,6 +526,9 @@ class TranslateController(
     companion object {
         private const val MAX_CACHE_SIZE = 300
         private const val TRANSLATE_THREADS = 2
+        private const val AUTO_BATCH_DELAY_MS = 1000L
+        private const val AUTO_BATCH_MAX_ITEMS = 10
+        private const val AUTO_BATCH_MAX_ITEM_CHARS = 1500
         private const val ERROR_EMPTY_AFTER_CLEAN = "Nothing to translate after cleaning."
         private const val ERROR_EMPTY_TRANSLATION = "Backend returned an empty translation."
         private const val ERROR_BACKEND_EXCEPTION = "Translation backend error: "

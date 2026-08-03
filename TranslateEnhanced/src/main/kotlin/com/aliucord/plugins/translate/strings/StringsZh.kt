@@ -13,6 +13,7 @@ object StringsZh : IStrings {
     override val toastTranslated      = "消息已翻译"
     override val toastAutoPaused      = "翻译失败次数过多，已暂停自动翻译。点击恢复。"
     override val toastAutoResumed     = "已恢复自动翻译"
+    override val toastAutoDisabled    = "已关闭自动翻译"
     override val toastBackendFallback = "大模型翻译失败，已自动切换到 Google Translate"
     override val toastTranslateFailed = "翻译失败："
     override val toastTranslateError  = "翻译异常："

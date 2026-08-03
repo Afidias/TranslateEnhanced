@@ -13,6 +13,7 @@ interface IStrings {
     val toastTranslated: String
     val toastAutoPaused: String
     val toastAutoResumed: String
+    val toastAutoDisabled: String
     val toastBackendFallback: String
     val toastTranslateFailed: String
     val toastTranslateError: String
