@@ -9,6 +9,7 @@ object StringsZh : IStrings {
     override val actionToggleAuto     = "自动翻译此频道"
     override val actionDisableAuto    = "关闭自动翻译"
     override val actionResumeAuto     = "恢复自动翻译"
+    override val actionChannelConfig  = "频道翻译配置"
 
     override val toastTranslated      = "消息已翻译"
     override val toastAutoPaused      = "翻译失败次数过多，已暂停自动翻译。点击恢复。"
@@ -43,6 +44,10 @@ object StringsZh : IStrings {
     override val settingsCleanEmoji     = "翻译前去除 Emoji 表情"
     override val settingsAutoTranslateSelf = "翻译自己发送的消息"
     override val settingsAutoTranslateSelfDesc = "关闭（默认）：自动翻译时跳过自己发送的消息"
+    override val settingsCacheSection   = "翻译缓存"
+    override val settingsCacheInfo      = "译文缓存在 /sdcard/Aliucord/translate_cache.json，命中缓存不会再次请求翻译"
+    override val settingsCacheClearAll  = "清除全部翻译缓存"
+    override val settingsCacheCleared   = "翻译缓存已清除"
     override val settingsSupportedLanguages = "支持的语言："
     override val settingsCleaningLabel  = "文本清理"
     override val settingsCancel         = "取消"
@@ -72,4 +77,19 @@ object StringsZh : IStrings {
     override val settingsDebugOn        = "调试已开启，日志："
     override val settingsDebugOff       = "调试已关闭"
     override val settingsLogCleared     = "日志已清除"
+
+    // 频道翻译配置
+    override val channelConfigTitle         = "频道翻译配置"
+    override val channelConfigPromptHint    = "频道提示词（话题方向，可留空）"
+    override val channelConfigGlossaryHint  = "术语表（每行一条：原词=译文）"
+    override val channelConfigGenerate      = "自动生成"
+    override val channelConfigSave          = "保存"
+    override val channelConfigClear         = "清除配置"
+    override val channelConfigClearCache    = "清除本频道翻译缓存"
+    override val channelConfigSaved         = "频道配置已保存"
+    override val channelConfigCleared       = "频道配置已清除"
+    override val channelConfigGenerating    = "正在分析频道消息并生成配置…"
+    override val channelConfigGenerated     = "已生成，请检查后保存"
+    override val channelConfigGenerateFailed = "生成失败："
+    override val channelConfigCacheCleared  = "本频道翻译缓存已清除"
 }

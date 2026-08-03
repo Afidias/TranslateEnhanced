@@ -29,7 +29,9 @@ class LLMTranslator(
     apiKey: Any,
     model: Any,
     systemPrompt: Any = DEFAULT_SYSTEM_PROMPT,
-    forceRetranslate: Boolean = false
+    forceRetranslate: Boolean = false,
+    channelContext: String = "",
+    glossary: List<Pair<String, String>> = emptyList()
 ) : TranslatorBackend {
 
     private val baseUrlStr: String = baseUrl.toRealString()
@@ -37,6 +39,8 @@ class LLMTranslator(
     private val modelStr: String = model.toRealString()
     private val systemPromptStr: String = systemPrompt.toRealString()
     private val forceFlag: Boolean = forceRetranslate
+    private val channelContextStr: String = channelContext
+    private val glossaryList: List<Pair<String, String>> = glossary
 
     override fun translate(
         text: String,
@@ -438,7 +442,7 @@ class LLMTranslator(
             "Do not translate URLs (http/https links); preserve them verbatim. " +
             "Preserve any placeholder tokens like [[URL_0]], [[EMOJI_0]], [[TAG_0]] " +
             "exactly as they appear." +
-            forceNote + "\n\n$text"
+            forceNote + buildContextNote() + "\n\n$text"
     }
 
     private fun buildBatchPrompt(messagesJson: String, sourceLang: String?, targetLang: String): String {
@@ -452,7 +456,116 @@ class LLMTranslator(
             "[0] translated text of message 0\n" +
             "[1] translated text of message 1\n" +
             "Do not add explanations, blank lines, bullet points, or code fences. " +
-            "Do not wrap translated text in quotes.\n\nMessages:\n$messagesJson"
+            "Do not wrap translated text in quotes." +
+            buildContextNote() + "\n\nMessages:\n$messagesJson"
+    }
+
+    /** 频道上下文与术语表注入。 */
+    private fun buildContextNote(): String {
+        val sb = StringBuilder()
+        if (channelContextStr.isNotEmpty()) {
+            sb.append(" Channel context: ").append(channelContextStr).append(".")
+        }
+        if (glossaryList.isNotEmpty()) {
+            sb.append(" Terminology (use these exact translations): ")
+            var first = true
+            for ((term, trans) in glossaryList) {
+                if (!first) sb.append("; ")
+                first = false
+                sb.append(term).append(" => ").append(trans)
+            }
+            sb.append(".")
+        }
+        return sb.toString()
+    }
+
+    /**
+     * 原始对话补全（用于"自动生成频道翻译配置"等非翻译任务）。
+     * 返回 Success(translatedText=模型回复) 或 Error。
+     */
+    fun complete(prompt: String): TranslateResult {
+        if (apiKeyStr == "" || apiKeyStr == "null" ||
+            baseUrlStr == "" || baseUrlStr == "null") {
+            return TranslateResult.Error(errorText = "LLM API key or base URL not configured.")
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", modelStr)
+            put("temperature", 0.0)
+            put("max_tokens", 2048)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", systemPromptStr)
+                })
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+            })
+        }
+
+        val url = buildUrl(baseUrlStr, "chat/completions")
+        val bodyBytes = requestBody.toString().toByteArray(Charsets.UTF_8)
+        var lastError: Exception? = null
+
+        for (attempt in 0..1) {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = URL(url).openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Authorization", "Bearer $apiKeyStr")
+                conn.setRequestProperty("User-Agent", USER_AGENT)
+                conn.setRequestProperty("Accept", "application/json")
+                conn.connectTimeout = 120_000
+                conn.readTimeout = 120_000
+                conn.doOutput = true
+                conn.setFixedLengthStreamingMode(bodyBytes.size)
+
+                conn.outputStream.use { out ->
+                    out.write(bodyBytes)
+                    out.flush()
+                }
+
+                val statusCode = conn.responseCode
+                if (statusCode !in 200..299) {
+                    val errBody = conn.errorStream?.let { readStream(it) } ?: ""
+                    if (attempt == 0) {
+                        try { Thread.sleep(if (statusCode == 429) 3000 else 1000) } catch (ie: InterruptedException) { }
+                        continue
+                    }
+                    return TranslateResult.Error(
+                        errorCode = statusCode,
+                        errorText = "LLM API request failed ($statusCode): ${errBody.take(300)}"
+                    )
+                }
+
+                val responseText = readStream(conn.inputStream)
+                val json = JSONObject(responseText)
+                val content = json.getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+                    .trim()
+
+                return TranslateResult.Success(
+                    sourceLanguage = "auto",
+                    translatedLanguage = "auto",
+                    sourceText = prompt,
+                    translatedText = content
+                )
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt == 0) {
+                    try { Thread.sleep(1000) } catch (ie: InterruptedException) { }
+                }
+            } finally {
+                try { conn?.disconnect() } catch (_: Exception) { }
+            }
+        }
+
+        return TranslateResult.Error(errorText = "LLM request exception: ${lastError?.message}")
     }
 
     companion object {

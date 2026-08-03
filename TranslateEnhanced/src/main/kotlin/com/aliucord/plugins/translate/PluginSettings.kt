@@ -108,6 +108,16 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         ))
         addView(switchRow(ctx, strings.settingsCleanEmoji, SETTINGS_KEY_CLEAN_EMOJI, true))
 
+        // ── 翻译缓存 ────────────────────────────────────────
+        addHeader(ctx, strings.settingsCacheSection)
+        addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
+            text = strings.settingsCacheInfo
+        })
+        addView(fullButton(ctx, strings.settingsCacheClearAll) {
+            TranslationCache.clearAll()
+            Utils.showToast(strings.settingsCacheCleared)
+        })
+
         // ── 调试 ────────────────────────────────────────────
         addHeader(ctx, strings.settingsSectionDebug)
         addView(switchRow(ctx, strings.settingsDebugMode, SETTINGS_KEY_DEBUG_MODE, false) { v ->
@@ -118,7 +128,10 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             text = strings.settingsDebugLogPath
             setOnClickListener { Utils.showToast(strings.settingsDebugLogPath) }
         })
-        addView(clearLogButton(ctx, strings))
+        addView(fullButton(ctx, strings.settingsDebugClearLog) {
+            DebugLogger.clearLog()
+            Utils.showToast(strings.settingsLogCleared)
+        })
 
         refreshBackend()
         refreshLangRow(langRow, strings)
@@ -315,22 +328,19 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             setOnClickListener { onClick() }
         }
 
-    /** 清除日志按钮（通栏） */
-    private fun clearLogButton(ctx: Context, strings: IStrings): CardView =
+    /** 通栏操作按钮（清除日志/清除缓存等） */
+    private fun fullButton(ctx: Context, text: String, onClick: () -> Unit): CardView =
         CardView(ctx).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             radius = 8f
             setCardBackgroundColor(ColorCompat.getThemedColor(ctx, R.b.colorBackgroundSecondary))
             setContentPadding(16, 14, 16, 14)
             addView(TextView(ctx).apply {
-                text = strings.settingsDebugClearLog
+                this.text = text
                 setTextColor(ColorCompat.getThemedColor(ctx, R.b.colorHeaderPrimary))
                 gravity = android.view.Gravity.CENTER
                 textSize = 14f
             })
-            setOnClickListener {
-                DebugLogger.clearLog()
-                Utils.showToast(strings.settingsLogCleared)
-            }
+            setOnClickListener { onClick() }
         }
 }

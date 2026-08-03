@@ -40,7 +40,8 @@ class TranslateController(
     private val settings: SettingsAPI,
     private val strings: IStrings,
     private val onShowToast: (String, Boolean) -> Unit = { msg, isLong -> Utils.showToast(msg, isLong) },
-    private val onAutoResult: (channelId: Long, messageId: Long, success: Boolean) -> Unit = { _, _, _ -> }
+    private val onAutoResult: (channelId: Long, messageId: Long, success: Boolean) -> Unit = { _, _, _ -> },
+    private val isChannelAutoEnabled: (Long) -> Boolean = { true }
 ) {
     private val translatedMessages: MutableMap<Long, TranslateResult.Success> =
         Collections.synchronizedMap(
@@ -97,6 +98,25 @@ class TranslateController(
         pendingMessages.remove(messageId)
     }
 
+    /** 直接把结果写入内存缓存并刷新消息（用于持久缓存命中）。 */
+    fun cacheResult(messageId: Long, result: TranslateResult.Success) {
+        translatedMessages[messageId] = result.copy(sourceText = result.sourceText)
+        rerender(messageId)
+    }
+
+    /** 关闭自动翻译时调用：清掉该频道排队中的批量条目并释放 pending。 */
+    fun cancelAutoChannel(channelId: Long) {
+        val it = autoBatchQueue.iterator()
+        while (it.hasNext()) {
+            val item = it.next()
+            if (item.channelId == channelId) {
+                it.remove()
+                endTranslate(item.messageId)
+                DebugLogger.log("auto cancelled: queued msg=${item.messageId} channel=$channelId")
+            }
+        }
+    }
+
     /** 提交一个后台任务（翻译）到插件线程池。 */
     fun submit(task: () -> Unit) {
         getExecutor().execute(task)
@@ -110,6 +130,7 @@ class TranslateController(
         batchScheduler = null
         autoBatchQueue.clear()
         batchFlushScheduled = false
+        TranslationCache.flush()
         translatedMessages.clear()
         pendingMessages.clear()
         chatList = null
@@ -161,10 +182,27 @@ class TranslateController(
         val safeText = text.toRealString()
         val safeSource = sourceLang?.toRealString()
         val safeTarget = targetLang?.toRealString()
+
+        // 持久缓存：命中直接返回（force 重新翻译时跳过缓存）
+        if (messageId != null && !force) {
+            val cached = TranslationCache.get(messageId, safeText)
+            if (cached != null) {
+                DebugLogger.log("cache hit: msg=$messageId")
+                val cachedResult = TranslateResult.Success(
+                    sourceLanguage = cached.sourceLanguage,
+                    translatedLanguage = cached.translatedLanguage,
+                    sourceText = safeText,
+                    translatedText = cached.translatedText
+                )
+                translatedMessages[messageId] = cachedResult
+                return cachedResult
+            }
+        }
+
         val cleaned = TextCleaner.clean(safeText, settings)
         val cleanedText = cleaned.text
         val target = safeTarget ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
-        val backend = resolveBackend(force)
+        val backend = resolveBackend(force, channelId)
         val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
 
         if (!cleaned.hasRealText) {
@@ -258,6 +296,17 @@ class TranslateController(
         // 成功时缓存；sourceText 保存原始文本（未清理），供消息编辑检测使用
         if (result is TranslateResult.Success && messageId != null) {
             translatedMessages[messageId] = result.copy(sourceText = safeText)
+            TranslationCache.put(
+                messageId,
+                TranslationCache.CachedEntry(
+                    channelId = channelId ?: 0L,
+                    sourceText = safeText,
+                    translatedText = result.translatedText,
+                    sourceLanguage = result.sourceLanguage,
+                    translatedLanguage = result.translatedLanguage
+                )
+            )
+            TranslationCache.flush()
         }
 
         return result
@@ -399,46 +448,56 @@ class TranslateController(
         }
 
         var fallbackCount = 0
-        for ((targetLang, langItems) in items.groupBy { it.targetLang }) {
-            val normal = langItems.filter { it.text.length <= AUTO_BATCH_MAX_ITEM_CHARS }
-            val long = langItems.filter { it.text.length > AUTO_BATCH_MAX_ITEM_CHARS }
+        for ((channelId, chItems) in items.groupBy { it.channelId }) {
+            // 每个频道用各自的配置（频道提示词/术语表/思考模式）构造后端
+            val channelBackend = try {
+                resolveBackend(false, channelId)
+            } catch (e: Exception) {
+                GoogleTranslator()
+            }
 
-            if (backend is LLMTranslator) {
-                if (normal.isNotEmpty()) {
-                    val results = backend.translateBatch(
-                        normal.mapIndexed { i, item -> i to item.text },
-                        null,
-                        targetLang
-                    )
-                    normal.forEachIndexed { i, item ->
-                        if (finalizeAutoItem(
-                                item,
-                                results[i] ?: TranslateResult.Error(errorText = "batch missing result")
-                            )
-                        ) fallbackCount++
+            for ((targetLang, langItems) in chItems.groupBy { it.targetLang }) {
+                val normal = langItems.filter { it.text.length <= AUTO_BATCH_MAX_ITEM_CHARS }
+                val long = langItems.filter { it.text.length > AUTO_BATCH_MAX_ITEM_CHARS }
+
+                if (channelBackend is LLMTranslator) {
+                    if (normal.isNotEmpty()) {
+                        val results = channelBackend.translateBatch(
+                            normal.mapIndexed { i, item -> i to item.text },
+                            null,
+                            targetLang
+                        )
+                        normal.forEachIndexed { i, item ->
+                            if (finalizeAutoItem(
+                                    item,
+                                    results[i] ?: TranslateResult.Error(errorText = "batch missing result")
+                                )
+                            ) fallbackCount++
+                        }
                     }
-                }
-                // 超长消息不合并，单条走 LLM
-                long.forEach { item ->
-                    val r = try {
-                        backend.translate(item.text, null, targetLang)
-                    } catch (e: Exception) {
-                        TranslateResult.Error(errorText = "LLM request exception: ${e.message}")
+                    // 超长消息不合并，单条走 LLM
+                    long.forEach { item ->
+                        val r = try {
+                            channelBackend.translate(item.text, null, targetLang)
+                        } catch (e: Exception) {
+                            TranslateResult.Error(errorText = "LLM request exception: ${e.message}")
+                        }
+                        if (finalizeAutoItem(item, r)) fallbackCount++
                     }
-                    if (finalizeAutoItem(item, r)) fallbackCount++
-                }
-            } else {
-                // Google 后端：逐条（与旧行为一致）
-                langItems.forEach { item ->
-                    val r = try {
-                        backend.translate(item.text, null, targetLang)
-                    } catch (e: Exception) {
-                        TranslateResult.Error(errorText = "Translation backend error: ${e.message}")
+                } else {
+                    // Google 后端：逐条（与旧行为一致）
+                    langItems.forEach { item ->
+                        val r = try {
+                            channelBackend.translate(item.text, null, targetLang)
+                        } catch (e: Exception) {
+                            TranslateResult.Error(errorText = "Translation backend error: ${e.message}")
+                        }
+                        if (finalizeAutoItem(item, r)) fallbackCount++
                     }
-                    if (finalizeAutoItem(item, r)) fallbackCount++
                 }
             }
         }
+        TranslationCache.flush()
         val doneToast = strings.toastAutoBatchDonePrefix + items.size + strings.toastAutoBatchDoneSuffix +
             (if (fallbackCount > 0)
                 strings.toastAutoBatchDoneFallbackPrefix + fallbackCount + strings.toastAutoBatchDoneFallbackMid
@@ -475,6 +534,14 @@ class TranslateController(
     private fun finalizeAutoItem(item: AutoBatchItem, result: TranslateResult): Boolean {
         var r = result
         var fallbackUsed = false
+
+        // 自动翻译已关闭/暂停：丢弃结果，不再缓存/刷新/降级
+        if (!isChannelAutoEnabled(item.channelId)) {
+            DebugLogger.log("auto dropped: channel disabled (msg=${item.messageId})")
+            endTranslate(item.messageId)
+            return false
+        }
+
         if (r is TranslateResult.Success) {
             if (safeIsBlank(r.translatedText)) {
                 r = TranslateResult.Error(errorText = "Backend returned an empty translation.")
@@ -501,6 +568,16 @@ class TranslateController(
 
         if (r is TranslateResult.Success) {
             translatedMessages[item.messageId] = r.copy(sourceText = item.original)
+            TranslationCache.put(
+                item.messageId,
+                TranslationCache.CachedEntry(
+                    channelId = item.channelId,
+                    sourceText = item.original,
+                    translatedText = r.translatedText,
+                    sourceLanguage = r.sourceLanguage,
+                    translatedLanguage = r.translatedLanguage
+                )
+            )
             DebugLogger.log("auto batch item ok: msg=${item.messageId}")
             rerender(item.messageId)
             onAutoResult(item.channelId, item.messageId, true)
@@ -517,10 +594,13 @@ class TranslateController(
             it.translatedText.isEmpty() && !it.showingOriginal
         } ?: false
 
-    private fun resolveBackend(force: Boolean = false): TranslatorBackend {
+    private fun resolveBackend(force: Boolean = false, channelId: Long? = null): TranslatorBackend {
         return try {
             val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
             if (choice == "llm") {
+                // 按频道注入专属提示词/术语表
+                val context = if (channelId != null) ChannelConfig.getPrompt(settings, channelId) else ""
+                val glossary = if (channelId != null) ChannelConfig.getGlossary(settings, channelId) else emptyList()
                 // 直接传 getString() 原始返回值给 LLMTranslator
                 // LLMTranslator 用 Any 接收 + String.format 转换，R8 无法优化
                 LLMTranslator(
@@ -531,7 +611,9 @@ class TranslateController(
                         SETTINGS_KEY_LLM_SYSTEM_PROMPT,
                         LLMTranslator.DEFAULT_SYSTEM_PROMPT
                     ) as Any,
-                    forceRetranslate = force
+                    forceRetranslate = force,
+                    channelContext = context,
+                    glossary = glossary
                 )
             } else {
                 GoogleTranslator()

@@ -9,6 +9,7 @@ interface IStrings {
     val actionToggleAuto: String
     val actionDisableAuto: String
     val actionResumeAuto: String
+    val actionChannelConfig: String
 
     val toastTranslated: String
     val toastAutoPaused: String
@@ -43,6 +44,10 @@ interface IStrings {
     val settingsCleanEmoji: String
     val settingsAutoTranslateSelf: String
     val settingsAutoTranslateSelfDesc: String
+    val settingsCacheSection: String
+    val settingsCacheInfo: String
+    val settingsCacheClearAll: String
+    val settingsCacheCleared: String
     val settingsSupportedLanguages: String
     val settingsCleaningLabel: String
     val settingsCancel: String
@@ -72,4 +77,19 @@ interface IStrings {
     val settingsDebugOn: String
     val settingsDebugOff: String
     val settingsLogCleared: String
+
+    // 频道翻译配置
+    val channelConfigTitle: String
+    val channelConfigPromptHint: String
+    val channelConfigGlossaryHint: String
+    val channelConfigGenerate: String
+    val channelConfigSave: String
+    val channelConfigClear: String
+    val channelConfigClearCache: String
+    val channelConfigSaved: String
+    val channelConfigCleared: String
+    val channelConfigGenerating: String
+    val channelConfigGenerated: String
+    val channelConfigGenerateFailed: String
+    val channelConfigCacheCleared: String
 }

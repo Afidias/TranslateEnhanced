@@ -9,6 +9,7 @@ object StringsEn : IStrings {
     override val actionToggleAuto     = "Auto translate this channel"
     override val actionDisableAuto    = "Disable auto translate"
     override val actionResumeAuto     = "Resume auto translate"
+    override val actionChannelConfig  = "Channel translation config"
 
     override val toastTranslated      = "Message translated"
     override val toastAutoPaused      = "Auto translate paused due to failures. Tap to resume."
@@ -43,6 +44,10 @@ object StringsEn : IStrings {
     override val settingsCleanEmoji     = "Clean emoji before translating"
     override val settingsAutoTranslateSelf = "Translate my own messages"
     override val settingsAutoTranslateSelfDesc = "Off (default): skip your own messages when auto-translating"
+    override val settingsCacheSection   = "Translation cache"
+    override val settingsCacheInfo      = "Translations are cached in /sdcard/Aliucord/translate_cache.json; cached messages are not re-translated"
+    override val settingsCacheClearAll  = "Clear all translation cache"
+    override val settingsCacheCleared   = "Translation cache cleared"
     override val settingsSupportedLanguages = "Supported languages:"
     override val settingsCleaningLabel  = "Text cleaning"
     override val settingsCancel         = "Cancel"
@@ -72,4 +77,19 @@ object StringsEn : IStrings {
     override val settingsDebugOn        = "Debug ON \u2192 "
     override val settingsDebugOff       = "Debug OFF"
     override val settingsLogCleared     = "Log cleared"
+
+    // Channel translation config
+    override val channelConfigTitle         = "Channel translation config"
+    override val channelConfigPromptHint    = "Channel prompt (topic context, optional)"
+    override val channelConfigGlossaryHint  = "Glossary (one per line: term=translation)"
+    override val channelConfigGenerate      = "Auto-generate"
+    override val channelConfigSave          = "Save"
+    override val channelConfigClear         = "Clear config"
+    override val channelConfigClearCache    = "Clear this channel's translation cache"
+    override val channelConfigSaved         = "Channel config saved"
+    override val channelConfigCleared       = "Channel config cleared"
+    override val channelConfigGenerating    = "Analyzing channel messages…"
+    override val channelConfigGenerated     = "Generated. Review and save."
+    override val channelConfigGenerateFailed = "Generation failed: "
+    override val channelConfigCacheCleared  = "Channel translation cache cleared"
 }
