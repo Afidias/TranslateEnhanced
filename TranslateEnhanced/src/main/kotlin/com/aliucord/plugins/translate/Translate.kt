@@ -170,7 +170,7 @@ class Translate : Plugin() {
                 val myId = StoreStream.getUsers().getMe().getId()
                 if (message?.author?.id == myId &&
                     !settings.getBool(SETTINGS_KEY_AUTO_TRANSLATE_SELF, false)) {
-                    DebugLogger.log("auto skip: own message ($messageId)")
+                    DebugLogger.log("auto skip: own message ($messageId author=${message?.author?.id})")
                     return@submit
                 }
 
@@ -183,6 +183,7 @@ class Translate : Plugin() {
                 }
 
                 // 入队等待批量合并（消息保持 pending，结果回来后统一释放）
+                DebugLogger.log("auto enqueue: msg=$messageId author=${message?.author?.id}")
                 controller.enqueueAutoTranslate(
                     TranslateController.AutoBatchItem(
                         messageId = messageId,

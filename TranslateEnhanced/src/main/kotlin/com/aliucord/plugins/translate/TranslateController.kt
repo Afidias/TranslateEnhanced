@@ -398,6 +398,7 @@ class TranslateController(
             GoogleTranslator()
         }
 
+        var fallbackCount = 0
         for ((targetLang, langItems) in items.groupBy { it.targetLang }) {
             val normal = langItems.filter { it.text.length <= AUTO_BATCH_MAX_ITEM_CHARS }
             val long = langItems.filter { it.text.length > AUTO_BATCH_MAX_ITEM_CHARS }
@@ -410,10 +411,11 @@ class TranslateController(
                         targetLang
                     )
                     normal.forEachIndexed { i, item ->
-                        finalizeAutoItem(
-                            item,
-                            results[i] ?: TranslateResult.Error(errorText = "batch missing result")
-                        )
+                        if (finalizeAutoItem(
+                                item,
+                                results[i] ?: TranslateResult.Error(errorText = "batch missing result")
+                            )
+                        ) fallbackCount++
                     }
                 }
                 // 超长消息不合并，单条走 LLM
@@ -423,7 +425,7 @@ class TranslateController(
                     } catch (e: Exception) {
                         TranslateResult.Error(errorText = "LLM request exception: ${e.message}")
                     }
-                    finalizeAutoItem(item, r)
+                    if (finalizeAutoItem(item, r)) fallbackCount++
                 }
             } else {
                 // Google 后端：逐条（与旧行为一致）
@@ -433,11 +435,15 @@ class TranslateController(
                     } catch (e: Exception) {
                         TranslateResult.Error(errorText = "Translation backend error: ${e.message}")
                     }
-                    finalizeAutoItem(item, r)
+                    if (finalizeAutoItem(item, r)) fallbackCount++
                 }
             }
         }
-        showAutoToast(strings.toastAutoBatchDonePrefix + items.size + strings.toastAutoBatchDoneSuffix)
+        val doneToast = strings.toastAutoBatchDonePrefix + items.size + strings.toastAutoBatchDoneSuffix +
+            (if (fallbackCount > 0)
+                strings.toastAutoBatchDoneFallbackPrefix + fallbackCount + strings.toastAutoBatchDoneFallbackMid
+            else "")
+        showAutoToast(doneToast)
 
         // 一次 flush 最多处理 AUTO_BATCH_MAX_ITEMS 条；还有积压则安排下一次 flush
         if (!autoBatchQueue.isEmpty() && !batchFlushScheduled) {
@@ -466,8 +472,9 @@ class TranslateController(
     /**
      * 批量结果收尾：还原占位符/链接、降级 Google、缓存、刷新 UI、记录成功/失败、释放 pending。
      */
-    private fun finalizeAutoItem(item: AutoBatchItem, result: TranslateResult) {
+    private fun finalizeAutoItem(item: AutoBatchItem, result: TranslateResult): Boolean {
         var r = result
+        var fallbackUsed = false
         if (r is TranslateResult.Success) {
             if (safeIsBlank(r.translatedText)) {
                 r = TranslateResult.Error(errorText = "Backend returned an empty translation.")
@@ -484,9 +491,8 @@ class TranslateController(
                 if (fb is TranslateResult.Success && !safeIsBlank(fb.translatedText)) {
                     r = fb.copy(translatedText = TextCleaner.restoreAll(fb.translatedText, item.groups))
                     r = r.copy(translatedText = TextCleaner.ensureUrlsPresent(r.translatedText, item.urls))
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        onShowToast(strings.toastBackendFallback, false)
-                    }
+                    // 不逐条弹降级 toast（避免刷屏），降级数量汇总到"本批完成"提示
+                    fallbackUsed = true
                 }
             } catch (e: Exception) {
                 DebugLogger.log("Auto Google fallback threw exception: ${e.message}")
@@ -503,6 +509,7 @@ class TranslateController(
             onAutoResult(item.channelId, item.messageId, false)
         }
         endTranslate(item.messageId)
+        return fallbackUsed
     }
 
     fun isLoading(messageId: Long): Boolean =

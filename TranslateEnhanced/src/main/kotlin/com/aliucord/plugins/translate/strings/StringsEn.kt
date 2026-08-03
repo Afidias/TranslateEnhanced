@@ -19,6 +19,8 @@ object StringsEn : IStrings {
     override val toastAutoBatchRequestingEnd = " messages)…"
     override val toastAutoBatchDonePrefix  = "Batch done: "
     override val toastAutoBatchDoneSuffix  = " messages translated"
+    override val toastAutoBatchDoneFallbackPrefix = " ("
+    override val toastAutoBatchDoneFallbackMid = " fell back to Google)"
     override val toastBackendFallback = "LLM failed, falling back to Google Translate"
     override val toastTranslateFailed = "Translation failed: "
     override val toastTranslateError  = "Translation error: "

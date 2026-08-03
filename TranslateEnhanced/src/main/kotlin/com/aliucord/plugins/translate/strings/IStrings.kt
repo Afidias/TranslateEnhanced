@@ -19,6 +19,8 @@ interface IStrings {
     val toastAutoBatchRequestingEnd: String
     val toastAutoBatchDonePrefix: String
     val toastAutoBatchDoneSuffix: String
+    val toastAutoBatchDoneFallbackPrefix: String
+    val toastAutoBatchDoneFallbackMid: String
     val toastBackendFallback: String
     val toastTranslateFailed: String
     val toastTranslateError: String

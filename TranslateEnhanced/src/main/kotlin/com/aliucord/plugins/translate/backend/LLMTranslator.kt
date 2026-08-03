@@ -115,8 +115,8 @@ class LLMTranslator(
                     lastStatusCode = statusCode
                     lastErrorText = errBody.take(300)
                     if (attempt == 0) {
-                        // 短暂等待后重试
-                        try { Thread.sleep(1000) } catch (ie: InterruptedException) { }
+                        // 429 限流等待更久，其余等待 1s 后重试一次
+                        try { Thread.sleep(if (statusCode == 429) 3000 else 1000) } catch (ie: InterruptedException) { }
                         continue
                     }
                     return TranslateResult.Error(
@@ -152,7 +152,6 @@ class LLMTranslator(
                 lastError = e
                 DebugLogger.log("[LLM] Attempt ${attempt + 1} exception: ${e.message}")
                 if (attempt == 0) {
-                    // 短暂等待后重试
                     try { Thread.sleep(1000) } catch (ie: InterruptedException) { }
                 }
             } finally {
@@ -247,7 +246,7 @@ class LLMTranslator(
                     if (attempt == 0) {
                         // 429 限流等待更久，其余等待 1s 后重试一次
                         try {
-                            Thread.sleep(if (statusCode == 429) 2000 else 1000)
+                            Thread.sleep(if (statusCode == 429) 3000 else 1000)
                         } catch (ie: InterruptedException) { }
                         continue
                     }
@@ -267,7 +266,7 @@ class LLMTranslator(
                     .trim()
                 DebugLogger.log("[LLM] Batch response: ${content.take(500)}")
 
-                val parsed = parseBatchResponse(content, items, sourceLang, targetLang)
+                val parsed = parseBatchOutput(content, items, sourceLang, targetLang)
                 if (parsed.isNotEmpty()) {
                     return parsed
                 }
@@ -291,14 +290,33 @@ class LLMTranslator(
         return items.associate { (id, _) -> id to err }
     }
 
-    private fun parseBatchResponse(
+    /**
+     * 解析批量响应，支持两种格式：
+     * 1. 行格式（首选）：每行 `[id] 译文`，不依赖 JSON 转义，模型不会产出非法 JSON；
+     * 2. JSON 格式（兼容）：{"translations":[{"id","text"}]}
+     */
+    private fun parseBatchOutput(
+        content: String,
+        items: List<Pair<Int, String>>,
+        sourceLang: String?,
+        targetLang: String
+    ): Map<Int, TranslateResult> {
+        val cleaned = stripCodeFence(content)
+        return if (cleaned.startsWith("{")) {
+            parseBatchJson(cleaned, items, sourceLang, targetLang)
+        } else {
+            parseBatchLines(cleaned, items, sourceLang, targetLang)
+        }
+    }
+
+    private fun parseBatchJson(
         content: String,
         items: List<Pair<Int, String>>,
         sourceLang: String?,
         targetLang: String
     ): Map<Int, TranslateResult> {
         val map = mutableMapOf<Int, TranslateResult>()
-        val json = JSONObject(stripCodeFence(content))
+        val json = JSONObject(content)
         val arr = json.getJSONArray("translations")
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
@@ -312,6 +330,55 @@ class LLMTranslator(
                 translatedText = text
             )
         }
+        items.forEach { (id, _) ->
+            if (!map.containsKey(id)) {
+                map[id] = TranslateResult.Error(errorText = "LLM batch missing translation for item $id")
+            }
+        }
+        return map
+    }
+
+    /** 行格式解析：`[0] 译文`，支持 `[0]: 译文` / `0. 译文` 等变体；无标记的续行拼接到上一条。 */
+    private fun parseBatchLines(
+        content: String,
+        items: List<Pair<Int, String>>,
+        sourceLang: String?,
+        targetLang: String
+    ): Map<Int, TranslateResult> {
+        val map = mutableMapOf<Int, TranslateResult>()
+        val lineRegex = Regex("^\\s*\\[(\\d+)\\][:.]?\\s*(.*)$")
+        val looseRegex = Regex("^\\s*(\\d+)[:.、)\\]\\s]+(.*)$")
+        var currentId = -1
+        var currentText = StringBuilder()
+
+        fun flush() {
+            if (currentId >= 0 && currentText.toString().trim().isNotEmpty()) {
+                map[currentId] = TranslateResult.Success(
+                    sourceLanguage = sourceLang ?: "auto",
+                    translatedLanguage = targetLang,
+                    sourceText = items.firstOrNull { it.first == currentId }?.second ?: "",
+                    translatedText = currentText.toString().trim()
+                )
+            }
+        }
+
+        for (rawLine in content.split("\n")) {
+            val line = rawLine.trim()
+            if (line.isEmpty()) continue
+            val m1 = lineRegex.find(line)
+            val m2 = if (m1 == null) looseRegex.find(line) else null
+            val m = m1 ?: m2
+            if (m != null) {
+                flush()
+                currentId = m.groupValues[1].toIntOrNull() ?: -1
+                currentText = StringBuilder(m.groupValues[2])
+            } else if (currentId >= 0) {
+                // 模型把一条译文换行拆开时，续行拼到当前条目
+                currentText.append("\n").append(line)
+            }
+        }
+        flush()
+
         items.forEach { (id, _) ->
             if (!map.containsKey(id)) {
                 map[id] = TranslateResult.Error(errorText = "LLM batch missing translation for item $id")
@@ -365,9 +432,12 @@ class LLMTranslator(
         return "Translate the following messages ${langPart}to $targetLang. " +
             "Do not translate URLs (http/https links); preserve them verbatim. " +
             "Preserve any placeholder tokens like [[URL_0]], [[EMOJI_0]], [[TAG_0]] exactly as they appear. " +
-            "Return ONLY a JSON object: " +
-            "{\"translations\":[{\"id\":<original id>,\"text\":\"<translated text>\"}]}. " +
-            "Do not add any explanations or code fences.\n\nMessages:\n$messagesJson"
+            "Return ONLY one line per message, each line starting with the original id in square brackets " +
+            "followed by the translated text, for example:\n" +
+            "[0] translated text of message 0\n" +
+            "[1] translated text of message 1\n" +
+            "Do not add explanations, blank lines, bullet points, or code fences. " +
+            "Do not wrap translated text in quotes.\n\nMessages:\n$messagesJson"
     }
 
     companion object {

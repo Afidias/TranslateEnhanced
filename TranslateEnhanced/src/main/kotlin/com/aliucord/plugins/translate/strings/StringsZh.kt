@@ -19,6 +19,8 @@ object StringsZh : IStrings {
     override val toastAutoBatchRequestingEnd = " 条）…"
     override val toastAutoBatchDonePrefix  = "本批 "
     override val toastAutoBatchDoneSuffix  = " 条翻译完成"
+    override val toastAutoBatchDoneFallbackPrefix = "（"
+    override val toastAutoBatchDoneFallbackMid = " 条降级 Google）"
     override val toastBackendFallback = "大模型翻译失败，已自动切换到 Google Translate"
     override val toastTranslateFailed = "翻译失败："
     override val toastTranslateError  = "翻译异常："
