@@ -11,8 +11,32 @@ object TextCleaner {
     private val HTML_TAG_REGEX = Regex(
         "<(?:(?:@!?&?|#)\\d+|a?:\\w+:\\d+|t:\\d+[^>]*|/?[a-zA-Z][a-zA-Z0-9]*(?:\\s[^>]*)?)>"
     )
-    private val URL_REGEX = Regex("https?://\\S+")
+    // URL 匹配：以非空白开头，但遇到 CJK/全角/其他"不可能出现在 URL 里"的字符立即截断，
+    // 避免 "https://a.com。结束" 这类把后续文本吞进链接
+    private val URL_REGEX = Regex(
+        "https?://[^\\s" +
+            "\\u2000-\\u206F" +   // 通用标点（…、“”等）
+            "\\u3000-\\u303F" +   // CJK 标点（。、，！？「」等）
+            "\\u3040-\\u30FF" +   // 日文假名
+            "\\u3400-\\u9FFF" +   // CJK 统一汉字
+            "\\uAC00-\\uD7A3" +   // 韩文
+            "\\uF900-\\uFAFF" +   // CJK 兼容汉字
+            "\\uFF00-\\uFFEF" +   // 全角字符
+            "\\u0370-\\u03FF" +   // 希腊文
+            "\\u0400-\\u04FF" +   // 西里尔文
+            "\\u0590-\\u05FF" +   // 希伯来文
+            "\\u0600-\\u06FF" +   // 阿拉伯文
+            "\\u0900-\\u097F" +   // 天城文
+            "\\u0E00-\\u0E7F" +   // 泰文
+            "\\x{1F000}-\\x{1FAFF}" + // emoji（注意 \u 只吃 4 位十六进制，emoji 码点须用 \x{} 语法）
+            "]+"
+    )
     private val EMOJI_REGEX = Regex("[\\p{So}\\p{Sk}\\p{Sm}\\p{Sc}]+")
+
+    // URL 尾部常见的句子标点/闭合括号（如 "https://a.com/foo)." → "https://a.com/foo"）
+    private val URL_TRAILING_PUNCTUATION = charArrayOf(
+        '.', ',', ';', ':', '!', '?', '\'', '"', ')', ']', '}', '>', '`'
+    ).toHashSet()
 
     private const val URL_PLACEHOLDER_PREFIX = "[[URL_"
     private const val EMOJI_PLACEHOLDER_PREFIX = "[[EMOJI_"
@@ -55,7 +79,9 @@ object TextCleaner {
 
         if (settings.getBool(SETTINGS_KEY_CLEAN_URL, true)) {
             val urls = mutableListOf<String>()
-            result = replaceWithPlaceholders(result, URL_REGEX, URL_PLACEHOLDER_PREFIX, urls)
+            result = replaceWithPlaceholders(
+                result, URL_REGEX, URL_PLACEHOLDER_PREFIX, urls, ::trimUrl
+            )
             groups.add(PlaceholderGroup(URL_PLACEHOLDER_PREFIX, urls))
         }
 
@@ -117,21 +143,41 @@ object TextCleaner {
         input: String,
         regex: Regex,
         prefix: String,
-        out: MutableList<String>
+        out: MutableList<String>,
+        trimMatch: ((String) -> String)? = null
     ): String {
         val sb = StringBuilder()
         var searchFrom = 0
         var index = 0
         while (true) {
             val match = regex.find(input, searchFrom) ?: break
-            sb.append(input.substring(searchFrom, match.range.first))
-            sb.append(placeholder(prefix, index))
-            out.add(match.value)
-            index++
-            searchFrom = match.range.last + 1
+            val raw = match.value
+            val kept = trimMatch?.invoke(raw) ?: raw
+            val matchStart = match.range.first
+            val matchEnd = match.range.last + 1
+            sb.append(input.substring(searchFrom, matchStart))
+            if (kept.length > 0) {
+                sb.append(placeholder(prefix, index))
+                out.add(kept)
+                index++
+                searchFrom = matchStart + kept.length
+            } else {
+                // 整段都是标点等无效内容（极端情况），原样保留不占位
+                sb.append(raw)
+                searchFrom = matchEnd
+            }
         }
         sb.append(input.substring(searchFrom))
         return sb.toString()
+    }
+
+    /** 去掉 URL 尾部常见的句子标点/闭合括号。 */
+    private fun trimUrl(url: String): String {
+        var end = url.length
+        while (end > 0 && url[end - 1] in URL_TRAILING_PUNCTUATION) {
+            end--
+        }
+        return url.substring(0, end)
     }
 
     private fun placeholder(prefix: String, index: Int): String =

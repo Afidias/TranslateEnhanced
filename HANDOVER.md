@@ -138,6 +138,7 @@ TranslateEnhanced/
 ### 4.2 `TranslateController.kt`（调度中心）
 - `translateSync()`：所有防御转换都先 `toRealString()`；空译文/异常视为失败；LLM 失败自动回退 Google 并在主线程 Toast 提示。
 - **内容还原**：`TextCleaner.clean()` 把 URL/emoji/Discord 标记（提及、自定义表情、时间戳、HTML）分别替换为 `[[URL_n]]` / `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。
+- **URL 截断**：`URL_REGEX` 会在 CJK/全角/emoji 等"不可能出现在 URL 里"的字符处截断，并裁剪尾部常见标点/闭合括号（如 `https://a.com/foo)。` → `https://a.com/foo`），避免中文无空格时把后续文本吞进链接。
 - `translateSync()` 支持 `force` 参数：`resolveBackend(force)` 会把 `forceRetranslate` 传给 LLM 后端；译文与原文相同时额外写一条 WARNING 日志，便于定位"原样返回"是模型回显还是文本本就在目标语言。
 - `translateAsync()`：异常时记录崩溃日志 + 在 Toast 开头带上崩溃位置（`@Class.method:line`），并清除占位符恢复原文。
 - `resolveBackend()`：直接把 `settings.getString(...)` 的原始返回值 `as Any` 传给 `LLMTranslator`（关键手法，见第 6 节），外层 try-catch 失败回退 Google。
