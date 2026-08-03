@@ -5,6 +5,7 @@ object StringsEn : IStrings {
 
     override val actionTranslate      = "Translate message"
     override val actionShowOriginal   = "Show original"
+    override val actionRetranslate    = "Retranslate message"
     override val actionToggleAuto     = "Auto translate this channel"
     override val actionDisableAuto    = "Disable auto translate"
     override val actionResumeAuto     = "Resume auto translate"

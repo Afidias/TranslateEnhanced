@@ -107,7 +107,7 @@ class Translate : Plugin() {
                         if (safeIsBlank(safeContent)) return@submit
 
                         // 清理后为空（例如只有表情的消息）直接跳过，不计数失败
-                        if (safeIsBlank(TextCleaner.clean(safeContent, settings))) return@submit
+                        if (safeIsBlank(TextCleaner.clean(safeContent, settings).text)) return@submit
 
                         // 跳过自己发送的消息
                         val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()
@@ -225,6 +225,7 @@ class Translate : Plugin() {
 
     private fun patchMessageContextMenu() {
         val viewId = View.generateViewId()
+        val retranslateViewId = View.generateViewId()
         val menuClass = WidgetChatListActions::class.java
         val getBinding = menuClass.getDeclaredMethod("getBinding").apply { isAccessible = true }
 
@@ -254,6 +255,26 @@ class Translate : Plugin() {
                         android.os.Handler(android.os.Looper.getMainLooper()).post { menu.dismiss() }
                     }
                 }
+
+                // ── 重新翻译按钮：仅在已有译文缓存且不在翻译中时显示 ──
+                val retranslateBtn = binding.a.findViewById<TextView>(retranslateViewId)
+                if (retranslateBtn != null) {
+                    val message = (hookParam.args[0] as WidgetChatListActions.Model).message
+                    val cached = controller.getCached(message.id)
+                    retranslateBtn.visibility =
+                        if (cached != null && !controller.isLoading(message.id)) View.VISIBLE else View.GONE
+                    retranslateBtn.setOnClickListener {
+                        // force = true：绕过旧译文，重新调用后端；
+                        // 大模型后端会收到"不要原样回显"的额外提示
+                        controller.translateWithLoading(
+                            text = message.content,
+                            channelId = message.channelId,
+                            messageId = message.id,
+                            force = true
+                        )
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { menu.dismiss() }
+                    }
+                }
             }
         )
 
@@ -277,6 +298,13 @@ class Translate : Plugin() {
                 linearLayout.addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
                     id = viewId
                     text = label
+                    setCompoundDrawablesRelativeWithIntrinsicBounds(pluginIcon, null, null, null)
+                })
+
+                // 重新翻译按钮：可见性由 configureUI 按当前消息的缓存状态控制
+                linearLayout.addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
+                    id = retranslateViewId
+                    text = strings.actionRetranslate
                     setCompoundDrawablesRelativeWithIntrinsicBounds(pluginIcon, null, null, null)
                 })
 

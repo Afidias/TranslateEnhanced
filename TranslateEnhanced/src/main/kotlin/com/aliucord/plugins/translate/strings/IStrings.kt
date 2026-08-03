@@ -5,6 +5,7 @@ interface IStrings {
 
     val actionTranslate: String
     val actionShowOriginal: String
+    val actionRetranslate: String
     val actionToggleAuto: String
     val actionDisableAuto: String
     val actionResumeAuto: String

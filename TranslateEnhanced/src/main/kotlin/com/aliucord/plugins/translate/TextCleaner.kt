@@ -13,21 +13,82 @@ object TextCleaner {
     private val URL_REGEX       = Regex("https?://\\S+")
     private val EMOJI_REGEX     = Regex("[\\p{So}\\p{Sk}\\p{Sm}\\p{Sc}]+")
 
-    fun clean(text: String, settings: SettingsAPI): String {
+    private const val URL_PLACEHOLDER_PREFIX = "[[URL_"
+    private const val URL_PLACEHOLDER_SUFFIX = "]]"
+
+    /**
+     * 清理结果。
+     *
+     * 开启 cleanUrl 时 URL 不会被直接删除，而是替换成 [[URL_n]] 占位符，
+     * 翻译完成后用 [restoreUrls] 还原，保证译文保留原文链接。
+     *
+     * @property text 清理后的文本（URL 已替换为占位符）
+     * @property urls 按出现顺序抽取的原始 URL 列表
+     */
+    data class CleanResult(
+        val text: String,
+        val urls: List<String>
+    )
+
+    fun clean(text: String, settings: SettingsAPI): CleanResult {
         // 防御：运行时消息内容可能是混淆类型（如 d0.d0.b）而非真实 String，
         // 通过 CharSequence 反射逐字符提取真实 String
         var result = text.toRealString()
+        val urls = mutableListOf<String>()
+
+        // 先抽 URL：用占位符替换而不是删除，翻译后可以按原位置还原
+        if (settings.getBool(SETTINGS_KEY_CLEAN_URL, true)) {
+            val sb = StringBuilder(result.length)
+            var last = 0
+            var index = 0
+            for (match in URL_REGEX.findAll(result)) {
+                sb.append(result, last, match.range.first)
+                sb.append(urlPlaceholder(index))
+                urls.add(match.value)
+                index++
+                last = match.range.last + 1
+            }
+            sb.append(result, last, result.length)
+            result = sb.toString()
+        }
 
         if (settings.getBool(SETTINGS_KEY_CLEAN_HTML, true)) {
             result = result.replace(HTML_TAG_REGEX, "")
-        }
-        if (settings.getBool(SETTINGS_KEY_CLEAN_URL, true)) {
-            result = result.replace(URL_REGEX, "")
         }
         if (settings.getBool(SETTINGS_KEY_CLEAN_EMOJI, true)) {
             result = result.replace(EMOJI_REGEX, "")
         }
 
-        return result.trim()
+        return CleanResult(result.trim(), urls)
     }
+
+    /**
+     * 把译文中的 [[URL_n]] 占位符还原成原始 URL。
+     *
+     * 如果翻译引擎改写/吞掉了某个占位符，则把缺失的 URL 追加到译文末尾，
+     * 保证链接不会因为翻译而丢失。
+     */
+    fun restoreUrls(text: String, urls: List<String>): String {
+        if (urls.isEmpty()) return text
+        var result = text
+        val missing = mutableListOf<String>()
+
+        urls.forEachIndexed { i, url ->
+            val token = urlPlaceholder(i)
+            if (token in result) {
+                result = result.replace(token, url)
+            } else {
+                missing.add(url)
+            }
+        }
+
+        return if (missing.isEmpty()) {
+            result
+        } else {
+            result.trimEnd() + " " + missing.joinToString(" ")
+        }
+    }
+
+    private fun urlPlaceholder(index: Int): String =
+        URL_PLACEHOLDER_PREFIX + index + URL_PLACEHOLDER_SUFFIX
 }

@@ -28,13 +28,15 @@ class LLMTranslator(
     baseUrl: Any,
     apiKey: Any,
     model: Any,
-    systemPrompt: Any = DEFAULT_SYSTEM_PROMPT
+    systemPrompt: Any = DEFAULT_SYSTEM_PROMPT,
+    forceRetranslate: Boolean = false
 ) : TranslatorBackend {
 
     private val baseUrlStr: String = baseUrl.toRealString()
     private val apiKeyStr: String = apiKey.toRealString()
     private val modelStr: String = model.toRealString()
     private val systemPromptStr: String = systemPrompt.toRealString()
+    private val forceFlag: Boolean = forceRetranslate
 
     override fun translate(
         text: String,
@@ -177,8 +179,15 @@ class LLMTranslator(
     private fun buildUserPrompt(text: String, sourceLang: String?, targetLang: String): String {
         val langPart = if (sourceLang != null && sourceLang != "auto")
             "from $sourceLang " else ""
+        // 用户主动点击"重新翻译"时，提醒模型不要原样回显
+        val forceNote = if (forceFlag)
+            " Please translate the text even if the previous output was unchanged; " +
+            "do not echo the source text back. If the source is already in the target language, " +
+            "return it unchanged." else ""
         return "Translate ${langPart}to $targetLang. " +
-            "Only return the translated text, nothing else.\n\n$text"
+            "Only return the translated text, nothing else. " +
+            "Preserve any placeholder tokens like [[URL_0]] exactly as they appear." +
+            forceNote + "\n\n$text"
     }
 
     companion object {

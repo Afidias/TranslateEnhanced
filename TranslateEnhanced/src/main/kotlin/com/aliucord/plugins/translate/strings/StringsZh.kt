@@ -5,6 +5,7 @@ object StringsZh : IStrings {
 
     override val actionTranslate      = "翻译此消息"
     override val actionShowOriginal   = "显示原文"
+    override val actionRetranslate    = "重新翻译此消息"
     override val actionToggleAuto     = "自动翻译此频道"
     override val actionDisableAuto    = "关闭自动翻译"
     override val actionResumeAuto     = "恢复自动翻译"

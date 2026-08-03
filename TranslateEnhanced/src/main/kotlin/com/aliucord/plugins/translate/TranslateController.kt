@@ -123,16 +123,18 @@ class TranslateController(
         sourceLang: String? = null,
         targetLang: String? = null,
         channelId: Long? = null,
-        messageId: Long? = null
+        messageId: Long? = null,
+        force: Boolean = false
     ): TranslateResult {
         // 防御：运行时消息内容可能是混淆类型而非真实 String（d0.d0.b），
         // 用 CharSequence 反射提取真实 String 后再做任何字符串操作
         val safeText = text.toRealString()
         val safeSource = sourceLang?.toRealString()
         val safeTarget = targetLang?.toRealString()
-        val cleanedText = TextCleaner.clean(safeText, settings)
+        val cleaned = TextCleaner.clean(safeText, settings)
+        val cleanedText = cleaned.text
         val target = safeTarget ?: settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
-        val backend = resolveBackend()
+        val backend = resolveBackend(force)
         val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
 
         if (safeIsBlank(cleanedText)) {
@@ -173,6 +175,20 @@ class TranslateController(
             } catch (e: Exception) {
                 DebugLogger.log("Google fallback threw exception: ${e.message}")
             }
+        }
+
+        // 翻译成功后把 URL 占位符还原成原始链接，保证译文保留原文链接
+        // （如果翻译引擎吞掉了占位符，restoreUrls 会把缺失链接追加到译文末尾）
+        if (result is TranslateResult.Success && cleaned.urls.isNotEmpty()) {
+            result = result.copy(
+                translatedText = TextCleaner.restoreUrls(result.translatedText, cleaned.urls)
+            )
+        }
+
+        // 排查辅助：译文与原文完全相同（"原样返回"）时记录日志，
+        // 便于区分是大模型回显还是文本本就在目标语言
+        if (result is TranslateResult.Success && result.translatedText == safeText) {
+            DebugLogger.log("WARNING: translated text is identical to the source text")
         }
 
         // 记录翻译结果
@@ -219,13 +235,14 @@ class TranslateController(
         targetLang: String? = null,
         channelId: Long? = null,
         messageId: Long,
-        onComplete: ((TranslateResult) -> Unit)? = null
+        onComplete: ((TranslateResult) -> Unit)? = null,
+        force: Boolean = false
     ) {
         if (!pendingMessages.add(messageId)) return  // 已有一条翻译任务在跑
 
         getExecutor().execute {
             try {
-                val result = translateSync(text, sourceLang, targetLang, channelId, messageId)
+                val result = translateSync(text, sourceLang, targetLang, channelId, messageId, force)
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     if (result is TranslateResult.Success) {
                         rerender(messageId)
@@ -268,7 +285,8 @@ class TranslateController(
         sourceLang: String? = null,
         targetLang: String? = null,
         channelId: Long? = null,
-        messageId: Long
+        messageId: Long,
+        force: Boolean = false
     ) {
         if (pendingMessages.contains(messageId)) return
 
@@ -285,7 +303,7 @@ class TranslateController(
         )
         rerender(messageId)
 
-        translateAsync(safeText, sourceLang, targetLang, channelId, messageId)
+        translateAsync(safeText, sourceLang, targetLang, channelId, messageId, force = force)
     }
 
     fun isLoading(messageId: Long): Boolean =
@@ -293,7 +311,7 @@ class TranslateController(
             it.translatedText.isEmpty() && !it.showingOriginal
         } ?: false
 
-    private fun resolveBackend(): TranslatorBackend {
+    private fun resolveBackend(force: Boolean = false): TranslatorBackend {
         return try {
             val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
             if (choice == "llm") {
@@ -306,7 +324,8 @@ class TranslateController(
                     systemPrompt = settings.getString(
                         SETTINGS_KEY_LLM_SYSTEM_PROMPT,
                         LLMTranslator.DEFAULT_SYSTEM_PROMPT
-                    ) as Any
+                    ) as Any,
+                    forceRetranslate = force
                 )
             } else {
                 GoogleTranslator()
