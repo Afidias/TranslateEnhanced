@@ -1,6 +1,7 @@
 package com.aliucord.plugins.translate
 
 import com.aliucord.api.SettingsAPI
+import com.aliucord.plugins.translate.utils.safeIsBlank
 import com.aliucord.plugins.translate.utils.toRealString
 
 object TextCleaner {
@@ -71,7 +72,9 @@ object TextCleaner {
         }
 
         val trimmed = result.trim()
-        val hasRealText = PLACEHOLDER_REGEX.replace(trimmed, "").isNotBlank()
+        // 铁律：绝不对管线里的值调用 Kotlin 内联字符串扩展（isBlank/isNotBlank），
+        // R8 内联后会把混淆的 d0.d0.b 强转为 IntIterator 崩溃，这里只用 safeIsBlank
+        val hasRealText = !safeIsBlank(PLACEHOLDER_REGEX.replace(trimmed, ""))
         return CleanResult(trimmed, groups, hasRealText)
     }
 

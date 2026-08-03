@@ -248,7 +248,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 
 **记住三条铁律：**
 1. 任何来自 `settings.getString(...)` 或 `message.content` 的值，**先用 `.toRealString()` 转成真 String，再做任何字符串操作。**
-2. 判断空/空白用 `safeIsBlank(...)`，不要用 `.isBlank()` / `.isEmpty()`。
+2. 判断空/空白用 `safeIsBlank(...)`，不要用 `.isBlank()` / `.isNotBlank()` / `.isEmpty()`——**包括对"看起来已经是真 String"的中间结果**（如 `Regex.replace(...)` 的返回值），R8 跨函数内联后仍可能把 `d0.d0.b` 喂给这些内联扩展导致 `IntIterator` 崩溃。
 3. 往 `LLMTranslator` 传配置时传原始 `getString(...)` 并 `as Any`，不要提前 `.toString()`。
 
 ---
