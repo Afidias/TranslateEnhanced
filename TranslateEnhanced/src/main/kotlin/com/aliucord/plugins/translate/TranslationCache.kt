@@ -74,6 +74,18 @@ object TranslationCache {
         flush()
     }
 
+    /** 有缓存条目的频道 ID 列表（用于设置页按频道管理缓存）。 */
+    fun getKnownChannels(): List<Long> = synchronized(lock) {
+        ensureLoaded()
+        entries.values.map { it.channelId }.distinct().filter { it != 0L }
+    }
+
+    /** 某频道的缓存条数。 */
+    fun countForChannel(channelId: Long): Int = synchronized(lock) {
+        ensureLoaded()
+        entries.values.count { it.channelId == channelId }
+    }
+
     /** 把脏数据写入文件。 */
     fun flush() {
         synchronized(lock) {

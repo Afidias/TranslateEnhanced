@@ -145,7 +145,7 @@ TranslateEnhanced/
 ### 4.2 `TranslateController.kt`（调度中心）
 - `translateSync()`：所有防御转换都先 `toRealString()`；空译文/异常视为失败；LLM 失败自动回退 Google 并在主线程 Toast 提示。
 - **自动翻译批量合并**：`enqueueAutoTranslate()` 把待翻译消息放进队列，延迟 1s 后由单线程调度器 flush（每次最多 10 条、单条 ≤1500 字符，超限走单条）；LLM 后端合并为一次请求，Google 后端逐条。`finalizeAutoItem()` 统一还原占位符/链接、降级 Google、缓存、刷新、记录成功/失败并释放 pending。手动翻译不走批量，保持即时。
-- **频道级翻译配置**：`ChannelConfig` 按 `channelPrompt_{channelId}` / `channelGlossary_{channelId}` 存储专属提示词和术语表（每行 `原词=译文`）；`resolveBackend(force, channelId)` 注入 LLM prompt。消息菜单"频道翻译配置"可手改、可**自动生成**（`LLMTranslator.complete()` 分析最近 30 条消息输出 `PROMPT|...` / `TERM|原词=译文`），也可清除本频道缓存。
+- **频道级翻译配置**：`ChannelConfig` 按 `channelPrompt_{channelId}` / `channelGlossary_{channelId}` 存储专属提示词和术语表（每行 `原词=译文`），`channelConfigChannels` 维护频道登记表；`resolveBackend(force, channelId)` 注入 LLM prompt。管理入口统一在**设置子页面 `ChannelConfigsPage`**（设置页"频道配置"进入，频道 = 登记表 ∪ 缓存频道），消息菜单"频道翻译配置"直接打开对应频道的编辑对话框。可手改、可**自动生成**（`ChannelConfigUi` + `LLMTranslator.complete()` 分析最近 30 条消息输出 `PROMPT|...` / `TERM|原词=译文`，**生成后自动保存**），也可清除本频道缓存/配置。
 - **持久化翻译缓存**：`TranslationCache` 写 `/sdcard/Aliucord/translate_cache.json`（上限 1000 条，sourceText 校验防失效）；translateSync/批量命中直接返回不请求后端，成功时写缓存，批量结束/手动翻译/插件停止时 flush。设置页"翻译缓存"可清全部，频道配置对话框可清本频道。
 - **自动翻译进度 toast**：批量开始/请求后端/本批完成三个阶段都有 toast，`showAutoToast()` 限频（默认 2.5s 间隔），避免历史批量翻译时刷屏；**降级 Google 不再逐条弹 toast**，降级条数汇总进"本批完成"提示（如"本批 10 条翻译完成（3 条降级 Google）"）。
 - **内容还原**：`TextCleaner.clean()` 把 emoji/Discord 标记（提及、自定义表情、时间戳、HTML）替换为 `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。

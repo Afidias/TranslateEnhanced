@@ -48,6 +48,8 @@ interface IStrings {
     val settingsCacheInfo: String
     val settingsCacheClearAll: String
     val settingsCacheCleared: String
+    val settingsChannelSection: String
+    val settingsChannelConfigRow: String
     val settingsSupportedLanguages: String
     val settingsCleaningLabel: String
     val settingsCancel: String
@@ -92,4 +94,11 @@ interface IStrings {
     val channelConfigGenerated: String
     val channelConfigGenerateFailed: String
     val channelConfigCacheCleared: String
+    val channelConfigsTitle: String
+    val channelConfigsHint: String
+    val channelConfigsEmpty: String
+    val channelConfigsChannelPrefix: String
+    val channelConfigsConfiguredBadge: String
+    val channelConfigsCachedPrefix: String
+    val channelConfigsCachedSuffix: String
 }

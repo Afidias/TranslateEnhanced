@@ -99,6 +99,15 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             subtext = strings.settingsAutoTranslateSelfDesc
         ))
 
+        // ── 频道配置（提示词/术语表/缓存管理子页面）──────────
+        addHeader(ctx, strings.settingsChannelSection)
+        addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
+            text = strings.settingsChannelConfigRow
+            setOnClickListener {
+                Utils.openPageWithProxy(requireContext(), ChannelConfigsPage(settings))
+            }
+        })
+
         // ── 文本清理 ────────────────────────────────────────
         addHeader(ctx, strings.settingsCleaningLabel)
         addView(switchRow(ctx, strings.settingsCleanHtml, SETTINGS_KEY_CLEAN_HTML, true))
