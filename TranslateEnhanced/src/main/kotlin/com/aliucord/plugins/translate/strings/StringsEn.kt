@@ -19,6 +19,8 @@ object StringsEn : IStrings {
 
     override val settingsTitle          = "Translate Enhanced"
     override val settingsBackendLabel   = "Translation backend"
+    override val settingsSectionLLM     = "LLM Configuration"
+    override val settingsSectionDebug   = "Debug"
     override val settingsBackendGoogle  = "Google Translate"
     override val settingsBackendLLM     = "LLM (OpenAI compatible)"
     override val settingsDefaultLanguage = "Default target language (tap to set)"
@@ -54,7 +56,7 @@ object StringsEn : IStrings {
     override val settingsDebugMode      = "Debug Mode"
     override val settingsDebugModeDesc  = "Log translation details to file"
     override val settingsDebugClearLog  = "Clear Debug Log"
-    override val settingsDebugLogPath   = "Log file: /sdcard/Aliucord/translate_debug.log"
+    override val settingsDebugLogPath   = "Log file: /sdcard/Aliucord/translate.log"
     override val settingsDebugOn        = "Debug ON \u2192 "
     override val settingsDebugOff       = "Debug OFF"
     override val settingsLogCleared     = "Log cleared"

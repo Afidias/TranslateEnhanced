@@ -63,7 +63,7 @@ TranslateEnhanced/
             ├── Constants.kt                 # 所有常量（API URL、设置 key、日志路径）
             ├── TranslateResult.kt           # sealed class：Success / Error
             ├── LanguageMap.kt               # 语言名→代码 map，斜杠命令选项
-            ├── TextCleaner.kt               # 翻译前清理 HTML/URL/Emoji（URL 用占位符替换，译文后还原）
+            ├── TextCleaner.kt               # 翻译前清理 HTML/URL/Emoji（全部占位符化，译文后统一还原）
             ├── TranslateController.kt       # 调度中心：选后端、缓存、线程池、降级
             ├── PluginSettings.kt            # 设置页 UI
             ├── auto/
@@ -80,7 +80,7 @@ TranslateEnhanced/
             │   └── StringsZh.kt             # 中文字符串
             └── utils/
                 ├── ResourceUtils.kt         # ★ 核心：toRealString / safeIsBlank / safeGetString
-                ├── DebugLogger.kt           # 调试日志 + 无条件崩溃日志
+                ├── DebugLogger.kt           # 统一日志（单文件 translate.log，DEBUG/WARN/ERROR 分级）
                 ├── TranslateUnescaper.kt    # Google 返回的 \uXXXX 反转义
                 └── WidgetUtils.kt           # forceRerenderMessage（强制刷新单条消息）
 ```
@@ -137,7 +137,7 @@ TranslateEnhanced/
 
 ### 4.2 `TranslateController.kt`（调度中心）
 - `translateSync()`：所有防御转换都先 `toRealString()`；空译文/异常视为失败；LLM 失败自动回退 Google 并在主线程 Toast 提示。
-- **URL 保留**：`TextCleaner.clean()` 把 URL 替换为 `[[URL_n]]` 占位符，翻译成功后由 `TextCleaner.restoreUrls()` 还原到译文中；若翻译引擎吞掉占位符，缺失链接会追加到译文末尾，保证链接不丢。
+- **内容还原**：`TextCleaner.clean()` 把 URL/emoji/Discord 标记（提及、自定义表情、时间戳、HTML）分别替换为 `[[URL_n]]` / `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。
 - `translateSync()` 支持 `force` 参数：`resolveBackend(force)` 会把 `forceRetranslate` 传给 LLM 后端；译文与原文相同时额外写一条 WARNING 日志，便于定位"原样返回"是模型回显还是文本本就在目标语言。
 - `translateAsync()`：异常时记录崩溃日志 + 在 Toast 开头带上崩溃位置（`@Class.method:line`），并清除占位符恢复原文。
 - `resolveBackend()`：直接把 `settings.getString(...)` 的原始返回值 `as Any` 传给 `LLMTranslator`（关键手法，见第 6 节），外层 try-catch 失败回退 Google。
@@ -173,8 +173,9 @@ TranslateEnhanced/
 - `shouldTranslate()`：检测语言 == 目标语言则跳过；中文按完整代码比较（简繁互翻）。
 
 ### 4.8 `utils/DebugLogger.kt`
-- debug 模式开启时，翻译详情写 `/sdcard/Aliucord/translate_debug.log`。
-- **`logCrash()` 不受 debug 开关影响**，无条件写 `/sdcard/Aliucord/translate_crash.log`（用于抓环境相关崩溃）。
+- **统一日志系统**：所有日志写入同一个文件 `/sdcard/Aliucord/translate.log`（常量 `LOG_PATH`）。
+- DEBUG 级别（`log()` / `logTranslation()`）仅在 Debug Mode 开启时写入；**WARN/ERROR 级别无条件写入**，`logCrash()` 即 ERROR 级别，崩溃日志不会因开关丢失。
+- `clearLog()` 清除单一日志文件。
 
 ### 4.9 字符串（`strings/`）
 - `IStrings` 接口 + `StringsEn`/`StringsZh` 两份实现，`Context.getStrings()` 按系统语言选。
@@ -281,6 +282,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 - 本地：`./gradlew :TranslateEnhanced:make generateUpdaterJson`
 - 自动：push `main` → GitHub Actions 构建 → 产物推到 `builds` 分支（`TranslateEnhanced.zip` + `updater.json`）。
 - 用户侧更新源：`builds/updater.json`（在 `build.gradle.kts` 的 `updateUrl`/`buildUrl` 配置）。
+- **插件描述**：zip 内 `plugin.json` 的 `description` 来自 Gradle 项目的 `description` 属性（Aliucord gradle 插件 `Tasks.kt` 生成 manifest 时取 `project.description`）。目前仓库没有设置，在 `TranslateEnhanced/build.gradle.kts`（子项目脚本）里加 `description = "..."` 即可。
 
 ---
 
@@ -289,8 +291,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 1. 设置页开启 **Debug Mode**。
 2. 复现问题。
 3. 用文件管理器取出：
-   - `/sdcard/Aliucord/translate_debug.log`（翻译详情：原文/清洗后/源语言/目标语言/后端/结果/是否和原文相同）
-   - `/sdcard/Aliucord/translate_crash.log`（任何崩溃堆栈，不受 debug 开关影响）
+   - `/sdcard/Aliucord/translate.log`（统一日志：DEBUG 翻译详情 + WARN/ERROR 崩溃堆栈，带级别前缀）
 4. Toast 报错现在会在最前面带 `@Class.method:line`，对照源码定位。
 5. 设置页可一键"清除调试日志"。
 
@@ -309,15 +310,16 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 
 ### 加新的清理规则
 - 在 `TextCleaner.kt` 加正则 + 对应设置项开关。注意先 `toRealString()` 再处理。
-- 如果该清理项需要在译文中还原（例如 URL），参考现有 URL 占位符模式：清理时用 `[[NAME_n]]` 替换并保存原值，翻译成功后调用对应的 `restoreXxx()` 还原。
+- 所有清理项都走"占位符往返"：清理时用 `[[NAME_n]]` 替换并保存原值，翻译成功后由 `TextCleaner.restoreAll()` 统一还原（URL/emoji/标记三类已经接入）。
 
 ---
 
 ## 11. 已知问题 / TODO
 
-- "译文和原文相同（原样返回）"问题：根因未定（可能是模型回显、温度 0、或文本本就在目标语言）。目前已有两个兜底手段：消息菜单"重新翻译"（强制重翻 + 防回显提示）和译文与原文相同时的 WARNING 日志。若需彻底定位，让用户开 Debug Mode 回传 `translate_debug.log`。
-- 译文中的链接目前以纯文本还原（占位符 `[[URL_n]]` → 原始 URL），尚未恢复 Discord 的可点击 URL span；如需点击跳转，需要在 `applyTranslatedText` 中重建 UrlSpan（依赖 Discord 内部 API，版本升级易失效）。
-- 占位符 `[[URL_n]]` 依赖翻译引擎原样保留：Google 通常保留括号 token，LLM 侧已把"保留占位符"写进 user prompt；若仍被改写，`restoreUrls()` 会把缺失链接追加到译文末尾。
+- "译文和原文相同（原样返回）"问题：根因未定（可能是模型回显、温度 0、或文本本就在目标语言）。目前已有两个兜底手段：消息菜单"重新翻译"（强制重翻 + 防回显提示）和译文与原文相同时的 WARNING 日志。若需彻底定位，让用户开 Debug Mode 回传 `translate.log`。
+- **译文渲染依赖 Discord 内部 API**：`buildTranslatedBuilder()` 用 `DiscordParser.parseChannelMessage` + 反射调用 `WidgetChatListAdapterItemMessage` 的 `getMessageRenderContext/getMessagePreprocessor/getSpoilerClickHandler` 重渲染译文（URL 可点击、emoji/提及/时间戳原生显示）；Discord 升级改签名时自动回退纯文本显示。
+- 占位符（`[[URL_n]]` / `[[EMOJI_n]]` / `[[TAG_n]]`）依赖翻译引擎原样保留：Google 通常保留括号 token，LLM 侧已把"保留占位符"写进 user prompt；若仍被改写，`restoreAll()` 会把缺失内容追加到译文末尾。
+- 设置页使用 Discord 原生组件（`CheckedSetting` 单选/开关、`UiKit_Settings_Item_Header/Icon` 样式、Discord 主题色），LLM 配置区随后端选择动态显隐。
 - 大模型返回仅 `.trim()`，未处理模型可能夹带的 markdown/代码块包裹（如 ```json），如需可加后处理。
 - 自动翻译依赖 `onNewMessage` patch 的签名 `(Long, Long, Long)`，Discord 升级可能改签名，需重新适配。
 - `patchProcessMessageText` 依赖 `SimpleDraweeSpanTextView.mDraweeStringBuilder` 字段名，Discord 升级可能改名。
@@ -333,4 +335,4 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 - [ ] 读完第 6 节（R8 / `d0.d0.b`），这是本项目最容易再踩的坑。
 - [ ] 改任何字符串处理前，确认值已 `toRealString()`，判断空用 `safeIsBlank()`。
 - [ ] 改 UI 文案记得三处（`IStrings` + En + Zh）。
-- [ ] 让用户开 Debug Mode 回传 `translate_debug.log` / `translate_crash.log` 来报 bug。
+- [ ] 让用户开 Debug Mode 回传 `translate.log` 来报 bug。

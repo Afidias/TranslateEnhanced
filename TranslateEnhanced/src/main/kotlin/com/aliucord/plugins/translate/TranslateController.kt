@@ -137,7 +137,7 @@ class TranslateController(
         val backend = resolveBackend(force)
         val backendName = if (backend is GoogleTranslator) "Google" else "LLM"
 
-        if (safeIsBlank(cleanedText)) {
+        if (!cleaned.hasRealText) {
             DebugLogger.log("translateSync: nothing to translate after cleaning")
             return TranslateResult.Error(errorText = ERROR_EMPTY_AFTER_CLEAN)
         }
@@ -177,11 +177,11 @@ class TranslateController(
             }
         }
 
-        // 翻译成功后把 URL 占位符还原成原始链接，保证译文保留原文链接
-        // （如果翻译引擎吞掉了占位符，restoreUrls 会把缺失链接追加到译文末尾）
-        if (result is TranslateResult.Success && cleaned.urls.isNotEmpty()) {
+        // 翻译成功后把占位符还原成原始内容（URL/emoji/Discord 标记等）
+        // （如果翻译引擎吞掉了占位符，restoreAll 会把缺失内容追加到译文末尾）
+        if (result is TranslateResult.Success && cleaned.groups.isNotEmpty()) {
             result = result.copy(
-                translatedText = TextCleaner.restoreUrls(result.translatedText, cleaned.urls)
+                translatedText = TextCleaner.restoreAll(result.translatedText, cleaned.groups)
             )
         }
 

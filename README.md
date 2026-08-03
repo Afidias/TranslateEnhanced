@@ -9,7 +9,7 @@ Aliucord 翻译插件：Google Translate 与 OpenAI 兼容大模型双后端，�
 - 翻译前清理 HTML / URL / Emoji（可在设置中关闭）
 - 消息右键菜单：翻译 / 显示原文
 - `/translate` 斜杠命令
-- 调试模式：记录详细日志到 `/sdcard/Aliucord/translate_debug.log`
+- 调试模式：记录详细日志到 `/sdcard/Aliucord/translate.log`（崩溃日志也写入同一文件）
 
 ## 构建
 

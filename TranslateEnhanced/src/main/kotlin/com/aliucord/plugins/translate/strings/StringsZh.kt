@@ -19,6 +19,8 @@ object StringsZh : IStrings {
 
     override val settingsTitle          = "增强翻译"
     override val settingsBackendLabel   = "翻译后端"
+    override val settingsSectionLLM     = "大模型配置"
+    override val settingsSectionDebug   = "调试"
     override val settingsBackendGoogle  = "Google Translate"
     override val settingsBackendLLM     = "大模型（兼容 OpenAI）"
     override val settingsDefaultLanguage = "默认目标语言（点击设置）"
@@ -54,7 +56,7 @@ object StringsZh : IStrings {
     override val settingsDebugMode      = "调试模式"
     override val settingsDebugModeDesc  = "记录翻译详情到文件"
     override val settingsDebugClearLog  = "清除调试日志"
-    override val settingsDebugLogPath   = "日志文件：/sdcard/Aliucord/translate_debug.log"
+    override val settingsDebugLogPath   = "日志文件：/sdcard/Aliucord/translate.log"
     override val settingsDebugOn        = "调试已开启，日志："
     override val settingsDebugOff       = "调试已关闭"
     override val settingsLogCleared     = "日志已清除"

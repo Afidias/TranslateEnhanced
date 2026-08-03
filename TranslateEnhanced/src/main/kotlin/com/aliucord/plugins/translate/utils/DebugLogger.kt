@@ -1,7 +1,6 @@
 package com.aliucord.plugins.translate.utils
 
-import com.aliucord.plugins.translate.CRASH_LOG_PATH
-import com.aliucord.plugins.translate.DEBUG_LOG_PATH
+import com.aliucord.plugins.translate.LOG_PATH
 import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
@@ -10,7 +9,10 @@ import java.util.Locale
 
 /**
  * Debug 日志工具
- * 将插件运行日志写入文件，用于定位翻译问题
+ *
+ * 统一日志系统：所有日志（调试/警告/崩溃）写入同一个文件 [LOG_PATH]。
+ * - DEBUG/INFO 级别仅在开启 Debug Mode 时写入
+ * - WARN/ERROR 级别无条件写入（崩溃日志不会因开关而丢失）
  */
 object DebugLogger {
 
@@ -26,13 +28,12 @@ object DebugLogger {
 
     fun isEnabled(): Boolean = enabled
 
-    fun log(tag: String, message: String) {
-        if (!enabled) return
+    private fun write(level: String, message: String) {
         try {
             val timestamp = dateFormat.format(Date())
-            val logLine = "[$timestamp] [$tag] $message\n"
+            val logLine = "[$timestamp] [$level] $message\n"
 
-            val file = File(DEBUG_LOG_PATH)
+            val file = File(LOG_PATH)
             file.parentFile?.mkdirs()
             FileWriter(file, true).use { writer ->
                 writer.append(logLine)
@@ -40,8 +41,17 @@ object DebugLogger {
         } catch (_: Exception) { }
     }
 
+    fun log(tag: String, message: String) {
+        if (enabled) write("DEBUG", "[$tag] $message")
+    }
+
     fun log(message: String) {
         log("TranslateEnhanced", message)
+    }
+
+    /** 警告级别，无条件写入。 */
+    fun warn(message: String) {
+        write("WARN", message)
     }
 
     fun logTranslation(
@@ -73,32 +83,26 @@ object DebugLogger {
     }
 
     /**
-     * 无条件记录崩溃堆栈（不受 debug 开关影响），用于定位无法复现的环境问题。
+     * 无条件记录崩溃堆栈（ERROR 级别，不受 debug 开关影响），
+     * 与调试日志统一写入 translate.log，用于定位无法复现的环境问题。
      */
     fun logCrash(tag: String, e: Throwable) {
-        try {
-            val file = File(CRASH_LOG_PATH)
-            file.parentFile?.mkdirs()
-            FileWriter(file, true).use { writer ->
-                val line1 = "[$tag] " + (e.javaClass.simpleName) + ": " + (e.message) + "\n"
-                writer.append(line1)
-                val stack = e.stackTrace
-                if (stack != null) {
-                    val limit = Math.min(stack.size, 12)
-                    var i = 0
-                    while (i < limit) {
-                        writer.append("    at " + stack[i].toString() + "\n")
-                        i++
-                    }
-                }
-                writer.append("\n")
+        write("ERROR", "[$tag] " + e.javaClass.simpleName + ": " + e.message)
+        val stack = e.stackTrace
+        if (stack != null) {
+            val limit = Math.min(stack.size, 12)
+            var i = 0
+            while (i < limit) {
+                write("ERROR", "    at " + stack[i].toString())
+                i++
             }
-        } catch (_: Exception) { }
+        }
+        write("ERROR", "")
     }
 
     fun clearLog() {
         try {
-            val file = File(DEBUG_LOG_PATH)
+            val file = File(LOG_PATH)
             if (file.exists()) file.delete()
         } catch (_: Exception) { }
     }

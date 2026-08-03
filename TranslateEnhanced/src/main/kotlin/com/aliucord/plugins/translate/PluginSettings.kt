@@ -1,5 +1,7 @@
 package com.aliucord.plugins.translate
 
+import android.content.Context
+import android.content.res.ColorStateList
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -10,18 +12,20 @@ import com.aliucord.api.SettingsAPI
 import com.aliucord.fragments.SettingsPage
 import com.aliucord.plugins.translate.backend.LLMApiHelper
 import com.aliucord.plugins.translate.strings.IStrings
+import com.aliucord.plugins.translate.utils.DebugLogger
 import com.aliucord.plugins.translate.utils.getStrings
 import com.aliucord.plugins.translate.utils.safeGetString
-import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.utilities.color.ColorCompat
-import com.google.android.material.switchmaterial.SwitchMaterial
+import com.discord.views.CheckedSetting
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.lytefast.flexinput.R
 
-private const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
-private const val WRAP_CONTENT = ViewGroup.LayoutParams.WRAP_CONTENT
-
+/**
+ * 设置页：使用 Discord 原生组件（CheckedSetting 单选/开关、UiKit 标题与行样式），
+ * 配色跟随 Discord 主题（colorBackgroundSecondary / colorHeaderPrimary 等）。
+ */
 class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
 
     // 模型输入框引用，选择模型后直接更新，无需重建页面
@@ -31,159 +35,86 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         super.onViewBound(view)
         val ctx = requireContext()
         val strings = ctx.getStrings()
-        val textColor = ColorCompat.getThemedColor(ctx, R.b.colorOnPrimary)
-        val bgColor = ColorCompat.getThemedColor(ctx, R.b.colorSurface)
 
         setActionBarTitle(strings.settingsTitle)
 
-        // ── Backend selector (二选一：Google / 大模型) ───────────
-        addView(sectionLabel(strings.settingsBackendLabel, textColor))
-
-        val backendRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 12, 0, 12)
-        }
-
-        // 存储每个后端选项的 (label, TextView)，用于动态刷新选中状态
-        val backendLabels = mutableMapOf<String, String>()
-        val backendTextViews = mutableMapOf<String, TextView>()
-
-        // ── LLM settings (shown only when backend = llm) ─────────
+        // ── 大模型配置（仅当后端为 llm 时显示）────────────────
         val llmSection = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 20, 0, 20)
         }
-
-        llmSection.addView(settingsInput(strings.settingsLLMBaseUrl, SETTINGS_KEY_LLM_BASE_URL, textColor, bgColor))
-        llmSection.addView(settingsInput(strings.settingsLLMApiKey, SETTINGS_KEY_LLM_API_KEY, textColor, bgColor, isPassword = true))
-        llmSection.addView(settingsInput(strings.settingsLLMModel, SETTINGS_KEY_LLM_MODEL, textColor, bgColor))
-
-        // ── LLM API 测试按钮 ──────────────────────────────────────
-        val buttonRow = LinearLayout(ctx).apply {
+        llmSection.addView(sectionHeader(ctx, strings.settingsSectionLLM))
+        llmSection.addView(settingsInput(ctx, strings.settingsLLMBaseUrl, SETTINGS_KEY_LLM_BASE_URL))
+        llmSection.addView(settingsInput(ctx, strings.settingsLLMApiKey, SETTINGS_KEY_LLM_API_KEY, isPassword = true))
+        llmSection.addView(settingsInput(ctx, strings.settingsLLMModel, SETTINGS_KEY_LLM_MODEL))
+        llmSection.addView(LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 20, 0, 20)
+            setPadding(0, 8, 0, 8)
+            addView(actionButton(ctx, strings.settingsTestConnection) { testLLMConnection(strings) })
+            addView(actionButton(ctx, strings.settingsFetchModels) { fetchAvailableModels(strings) })
+        })
+
+        // ── 翻译后端（Discord 原生单选行）────────────────────
+        addHeader(ctx, strings.settingsBackendLabel)
+        val googleRow = Utils.createCheckedSetting(
+            ctx, CheckedSetting.ViewType.RADIO, strings.settingsBackendGoogle, null
+        )
+        val llmRow = Utils.createCheckedSetting(
+            ctx, CheckedSetting.ViewType.RADIO, strings.settingsBackendLLM, null
+        )
+
+        fun refreshBackend() {
+            val current = safeGetStr(SETTINGS_KEY_BACKEND, "google")
+            googleRow.isChecked = current == "google"
+            llmRow.isChecked = current == "llm"
+            llmSection.visibility = if (current == "llm") View.VISIBLE else View.GONE
         }
 
-        // 测试连接按钮
-        buttonRow.addView(button(strings.settingsTestConnection, textColor, bgColor) {
-            testLLMConnection(strings)
-        })
-
-        // 获取模型按钮
-        buttonRow.addView(button(strings.settingsFetchModels, textColor, bgColor) {
-            fetchAvailableModels(strings)
-        })
-
-        llmSection.addView(buttonRow)
-
-        // 刷新后端选项的选中样式和 LLM 区域可见性（定义在 llmSection 之后）
-        fun refreshBackendSelection() {
-            val backend = safeGetStr(SETTINGS_KEY_BACKEND, "google")
-            backendLabels.forEach { (value, label) ->
-                val selected = value == backend
-                backendTextViews[value]?.apply {
-                    text = if (selected) "✓  $label" else label
-                    setTextColor(textColor)
-                    setTypeface(
-                        typeface,
-                        if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
-                    )
-                }
+        googleRow.setOnClickListener {
+            if (!googleRow.isChecked) {
+                settings.setString(SETTINGS_KEY_BACKEND, "google")
+                refreshBackend()
             }
-            llmSection.visibility = if (backend == "llm") View.VISIBLE else View.GONE
         }
-
-        fun createBackendOption(label: String, value: String) {
-            backendLabels[value] = label
-            val labelView = TextView(ctx)
-            backendTextViews[value] = labelView
-            CardView(ctx).apply {
-                layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
-                    setMargins(6, 0, 6, 0)
-                }
-                setCardBackgroundColor(bgColor)
-                radius = 16f
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(20, 28, 20, 28)
-                    addView(labelView)
-                })
-                setOnClickListener {
-                    settings.setString(SETTINGS_KEY_BACKEND, value)
-                    refreshBackendSelection()
-                }
-            }.let { backendRow.addView(it) }
+        llmRow.setOnClickListener {
+            if (!llmRow.isChecked) {
+                settings.setString(SETTINGS_KEY_BACKEND, "llm")
+                refreshBackend()
+            }
         }
-
-        createBackendOption(strings.settingsBackendGoogle, "google")
-        createBackendOption(strings.settingsBackendLLM, "llm")
-        addView(backendRow)
+        addView(googleRow)
+        addView(llmRow)
         addView(llmSection)
 
-        // 初始化选中状态
-        refreshBackendSelection()
-
-        // ── Default language（点击弹出选择，动态更新文字）────────
-        addView(sectionLabel(strings.settingsDefaultLanguage, textColor))
-
-        val langRow = TextView(ctx).apply {
-            setPadding(0, 15, 0, 15)
-            setTextColor(textColor)
+        // ── 默认语言 ────────────────────────────────────────
+        addHeader(ctx, strings.settingsDefaultLanguage)
+        val langRow = TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
             setOnClickListener { showLanguagePicker(strings, this) }
         }
-
-        fun refreshLangRow() {
-            val name = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
-                ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
-            langRow.text = "➜  $name"
-        }
-
-        refreshLangRow()
         addView(langRow)
-        addView(divider(bgColor))
 
-        // ── Text cleaning toggles ────────────────────────────────
-        addView(sectionLabel(strings.settingsCleaningLabel, textColor))
+        // ── 文本清理 ────────────────────────────────────────
+        addHeader(ctx, strings.settingsCleaningLabel)
+        addView(switchRow(ctx, strings.settingsCleanHtml, SETTINGS_KEY_CLEAN_HTML, true))
+        addView(switchRow(ctx, strings.settingsCleanUrl, SETTINGS_KEY_CLEAN_URL, true))
+        addView(switchRow(ctx, strings.settingsCleanEmoji, SETTINGS_KEY_CLEAN_EMOJI, true))
 
-        addView(switchRow(strings.settingsCleanHtml, textColor).apply {
-            isChecked = settings.getBool(SETTINGS_KEY_CLEAN_HTML, true)
-            setOnCheckedChangeListener { _, v -> settings.setBool(SETTINGS_KEY_CLEAN_HTML, v) }
+        // ── 调试 ────────────────────────────────────────────
+        addHeader(ctx, strings.settingsSectionDebug)
+        addView(switchRow(ctx, strings.settingsDebugMode, SETTINGS_KEY_DEBUG_MODE, false) { v ->
+            DebugLogger.setEnabled(v)
+            Utils.showToast(if (v) strings.settingsDebugOn + LOG_PATH else strings.settingsDebugOff)
         })
-        addView(switchRow(strings.settingsCleanUrl, textColor).apply {
-            isChecked = settings.getBool(SETTINGS_KEY_CLEAN_URL, true)
-            setOnCheckedChangeListener { _, v -> settings.setBool(SETTINGS_KEY_CLEAN_URL, v) }
+        addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
+            text = strings.settingsDebugLogPath
+            setOnClickListener { Utils.showToast(strings.settingsDebugLogPath) }
         })
-        addView(switchRow(strings.settingsCleanEmoji, textColor).apply {
-            isChecked = settings.getBool(SETTINGS_KEY_CLEAN_EMOJI, true)
-            setOnCheckedChangeListener { _, v -> settings.setBool(SETTINGS_KEY_CLEAN_EMOJI, v) }
-        })
+        addView(clearLogButton(ctx, strings))
 
-        // ── Debug mode ───────────────────────────────────────────
-        addView(sectionLabel(strings.settingsDebugMode, textColor))
-
-        addView(switchRow(strings.settingsDebugModeDesc, textColor).apply {
-            isChecked = settings.getBool(SETTINGS_KEY_DEBUG_MODE, false)
-            setOnCheckedChangeListener { _, v ->
-                settings.setBool(SETTINGS_KEY_DEBUG_MODE, v)
-                DebugLogger.setEnabled(v)
-                Utils.showToast(if (v) strings.settingsDebugOn + DEBUG_LOG_PATH else strings.settingsDebugOff)
-            }
-        })
-
-        addView(textRow(strings.settingsDebugLogPath, textColor) {
-            Utils.showToast(strings.settingsDebugLogPath)
-        })
-
-        addView(button(strings.settingsDebugClearLog, textColor, bgColor) {
-            DebugLogger.clearLog()
-            Utils.showToast(strings.settingsLogCleared)
-        })
+        refreshBackend()
+        refreshLangRow(langRow, strings)
     }
 
-    /**
-     * 安全读取 String 设置项（使用扩展函数 safeGetString）
-     */
+    /** 安全读取 String 设置项（使用扩展函数 safeGetString） */
     private fun safeGetStr(key: String, default: String = ""): String =
         settings.safeGetString(key, default)
 
@@ -191,7 +122,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
      * 测试 LLM 连接
      * 注意：不调用任何 String 方法（isBlank, isEmpty 等），
      * 因为 settings.getString() 返回混淆类型，String 方法会崩溃。
-     * 直接传给 LLMApiHelper，由它用 String.format 转换。
+     * 直接传给 LLMApiHelper，由它用 toRealString 转换。
      */
     private fun testLLMConnection(strings: IStrings) {
         val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")
@@ -221,9 +152,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         }.start()
     }
 
-    /**
-     * 获取可用模型列表
-     */
+    /** 获取可用模型列表 */
     private fun fetchAvailableModels(strings: IStrings) {
         val baseUrl = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "")
         val apiKey = settings.getString(SETTINGS_KEY_LLM_API_KEY, "")
@@ -251,16 +180,13 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         }.start()
     }
 
-    /**
-     * 显示模型选择对话框
-     */
+    /** 显示模型选择对话框 */
     private fun showModelSelectionDialog(models: List<String>, strings: IStrings) {
         try {
             val ctx = requireContext()
             val currentModel = safeGetStr(SETTINGS_KEY_LLM_MODEL)
 
-            // 创建对话框
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            MaterialAlertDialogBuilder(ctx)
                 .setTitle(strings.settingsSelectModel)
                 .setItems(models.toTypedArray()) { _, which ->
                     val selectedModel = models[which]
@@ -276,10 +202,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         }
     }
 
-    /**
-     * 显示目标语言选择对话框（单选框列表）
-     * 选择后动态更新 langRow 文字，不重建页面
-     */
+    /** 显示目标语言选择对话框（单选框列表） */
     private fun showLanguagePicker(strings: IStrings, langRow: TextView? = null) {
         try {
             val ctx = requireContext()
@@ -287,17 +210,14 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             val currentCode = safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
             val currentIndex = languageCodes.values.indexOf(currentCode)
 
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            MaterialAlertDialogBuilder(ctx)
                 .setTitle(strings.settingsDefaultLanguage)
                 .setSingleChoiceItems(names, currentIndex) { dialog, which ->
                     val code = languageCodes.values.elementAt(which)
                     settings.setString(SETTINGS_KEY_DEFAULT_LANG, code)
                     Utils.showToast(strings.settingsLanguageSaved)
                     dialog.dismiss()
-                    // 动态更新语言行文字
-                    val name = languageCodes.entries.firstOrNull { it.value == safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG) }?.key
-                        ?: safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
-                    langRow?.text = "➜  $name"
+                    refreshLangRow(langRow, strings)
                 }
                 .setNegativeButton(strings.settingsCancel, null)
                 .show()
@@ -306,55 +226,58 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         }
     }
 
-    private fun refreshUI() { /* UI refreshes via the listener callbacks above */ }
+    private fun refreshLangRow(langRow: TextView?, strings: IStrings) {
+        val current = safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+        val name = languageCodes.entries.firstOrNull { it.value == current }?.key ?: current
+        langRow?.text = "➜  $name"
+    }
 
-    // ── Helper views ─────────────────────────────────────────────
+    // ── Discord 风格视图构造 ───────────────────────────────────
 
-    private fun sectionLabel(text: String, textColor: Int): TextView =
-        TextView(requireContext()).apply {
+    /** 分区标题（Discord UiKit_Settings_Item_Header 样式） */
+    private fun sectionHeader(ctx: Context, text: String): TextView =
+        TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Header).apply {
             this.text = text
-            setPadding(0, 30, 0, 10)
-            setTextColor(textColor)
-            textSize = 14f
         }
 
-    private fun switchRow(label: String, textColor: Int): SwitchMaterial =
-        SwitchMaterial(requireContext()).apply {
-            text = label
-            setTextColor(textColor)
-            setPadding(0, 12, 0, 12)
+    /** Discord 原生开关行 */
+    private fun switchRow(
+        ctx: Context,
+        label: String,
+        key: String,
+        default: Boolean,
+        onToggle: ((Boolean) -> Unit)? = null
+    ): CheckedSetting =
+        Utils.createCheckedSetting(ctx, CheckedSetting.ViewType.SWITCH, label, null).apply {
+            isChecked = settings.getBool(key, default)
+            setOnCheckedListener { v ->
+                settings.setBool(key, v)
+                onToggle?.invoke(v)
+            }
         }
 
-    private fun cardRow(text: String, textColor: Int, bgColor: Int): CardView =
-        CardView(requireContext()).apply {
-            layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-            setPadding(40, 40, 40, 40)
-            setContentPadding(20, 20, 20, 20)
-            setCardBackgroundColor(bgColor)
-            radius = 20f
-            addView(TextView(context).apply {
-                this.text = text
-                setTextColor(textColor)
-                textAlignment = View.TEXT_ALIGNMENT_CENTER
-            })
-        }
-
+    /** 文本输入（Discord 配色：二级背景 + 主色文字） */
     private fun settingsInput(
+        ctx: Context,
         hint: String,
         key: String,
-        textColor: Int,
-        bgColor: Int,
         isPassword: Boolean = false
     ): TextInputLayout =
-        TextInputLayout(requireContext()).apply {
-            layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-            setPadding(0, 12, 0, 12)
+        TextInputLayout(ctx).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setPadding(0, 8, 0, 8)
+            setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_FILL)
+            setBoxBackgroundColor(ColorCompat.getThemedColor(ctx, R.b.colorBackgroundSecondary))
+            setDefaultHintTextColor(ColorStateList.valueOf(ColorCompat.getThemedColor(ctx, R.b.colorHeaderSecondary)))
             this.hint = hint
-            addView(TextInputEditText(context).apply {
+            addView(TextInputEditText(ctx).apply {
                 setText(safeGetStr(key))
-                setTextColor(textColor)
+                setTextColor(ColorCompat.getThemedColor(ctx, R.b.colorHeaderPrimary))
+                setHintTextColor(ColorStateList.valueOf(ColorCompat.getThemedColor(ctx, R.b.colorHeaderSecondary)))
                 if (key == SETTINGS_KEY_LLM_MODEL) modelInput = this
-                if (isPassword) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                if (isPassword) {
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
                 setOnFocusChangeListener { _, hasFocus ->
                     if (!hasFocus) {
                         settings.setString(key, text.toString())
@@ -363,35 +286,40 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             })
         }
 
-    private fun button(text: String, textColor: Int, bgColor: Int, onClick: () -> Unit): CardView =
-        CardView(requireContext()).apply {
-            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply {
-                setMargins(8, 0, 8, 0)
+    /** 操作按钮（等宽并排） */
+    private fun actionButton(ctx: Context, text: String, onClick: () -> Unit): CardView =
+        CardView(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(6, 0, 6, 0)
             }
-            setPadding(30, 30, 30, 30)
-            setCardBackgroundColor(bgColor)
-            radius = 16f
-            addView(TextView(context).apply {
+            radius = 8f
+            setCardBackgroundColor(ColorCompat.getThemedColor(ctx, R.b.colorBackgroundSecondary))
+            setContentPadding(16, 14, 16, 14)
+            addView(TextView(ctx).apply {
                 this.text = text
-                setTextColor(textColor)
+                setTextColor(ColorCompat.getThemedColor(ctx, R.b.colorHeaderPrimary))
+                gravity = android.view.Gravity.CENTER
                 textSize = 14f
-                textAlignment = View.TEXT_ALIGNMENT_CENTER
             })
             setOnClickListener { onClick() }
         }
 
-    private fun textRow(text: String, textColor: Int, onClick: () -> Unit): TextView =
-        TextView(requireContext()).apply {
-            this.text = text
-            setPadding(0, 15, 0, 15)
-            setTextColor(textColor)
-            setOnClickListener { onClick() }
-        }
-
-    private fun divider(bgColor: Int): View =
-        View(requireContext()).apply {
-            setPadding(0, 6, 0, 6)
-            layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, 2)
-            setBackgroundColor(bgColor)
+    /** 清除日志按钮（通栏） */
+    private fun clearLogButton(ctx: Context, strings: IStrings): CardView =
+        CardView(ctx).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            radius = 8f
+            setCardBackgroundColor(ColorCompat.getThemedColor(ctx, R.b.colorBackgroundSecondary))
+            setContentPadding(16, 14, 16, 14)
+            addView(TextView(ctx).apply {
+                text = strings.settingsDebugClearLog
+                setTextColor(ColorCompat.getThemedColor(ctx, R.b.colorHeaderPrimary))
+                gravity = android.view.Gravity.CENTER
+                textSize = 14f
+            })
+            setOnClickListener {
+                DebugLogger.clearLog()
+                Utils.showToast(strings.settingsLogCleared)
+            }
         }
 }

@@ -25,6 +25,11 @@ import com.aliucord.plugins.translate.utils.toRealString
 import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.api.commands.ApplicationCommandType
 import com.discord.databinding.WidgetChatListActionsBinding
+import com.discord.models.message.Message
+import com.discord.stores.StoreMessageState
+import com.discord.utilities.textprocessing.DiscordParser
+import com.discord.utilities.textprocessing.MessagePreprocessor
+import com.discord.utilities.textprocessing.MessageRenderContext
 import com.discord.utilities.textprocessing.node.EditedMessageNode
 import com.discord.utilities.view.text.SimpleDraweeSpanTextView
 import com.discord.widgets.chat.list.WidgetChatList
@@ -34,6 +39,7 @@ import com.discord.widgets.chat.list.entries.MessageEntry
 import com.facebook.drawee.span.DraweeSpanStringBuilder
 import com.lytefast.flexinput.R
 import java.lang.reflect.Field
+import java.lang.reflect.Method
 
 @AliucordPlugin
 class Translate : Plugin() {
@@ -106,8 +112,8 @@ class Translate : Plugin() {
                         val safeContent = content.toRealString()
                         if (safeIsBlank(safeContent)) return@submit
 
-                        // 清理后为空（例如只有表情的消息）直接跳过，不计数失败
-                        if (safeIsBlank(TextCleaner.clean(safeContent, settings).text)) return@submit
+                        // 清理后没有可翻译文本（例如只有表情/链接/提及的消息）直接跳过，不计数失败
+                        if (!TextCleaner.clean(safeContent, settings).hasRealText) return@submit
 
                         // 跳过自己发送的消息
                         val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()
@@ -196,30 +202,128 @@ class Translate : Plugin() {
                 }
 
                 val textView = it.args[0] as SimpleDraweeSpanTextView
-                val builder = mDraweeStringBuilder[textView] as? DraweeSpanStringBuilder
-                    ?: return@Hook
+                if (mDraweeStringBuilder[textView] !is DraweeSpanStringBuilder) return@Hook
                 val ctx = textView.context
+                val adapter = it.thisObject as WidgetChatListAdapterItemMessage
 
-                builder.applyTranslatedText(data, ctx)
-                textView.setDraweeSpanStringBuilder(builder)
+                val translated = buildTranslatedBuilder(data, ctx, adapter, messageEntry, message)
+                textView.setDraweeSpanStringBuilder(translated)
             }
         )
     }
 
-    private fun DraweeSpanStringBuilder.applyTranslatedText(
+    /**
+     * 用 Discord 自己的解析器重渲染译文，恢复：
+     * - URL 可点击（UrlSpan）
+     * - emoji 图片 / 提及 / 频道 / 时间戳等原生 span
+     *
+     * 若解析器不可用（Discord 版本升级导致内部 API 变化），回退为纯文本显示。
+     */
+    private fun buildTranslatedBuilder(
         data: TranslateResult.Success,
-        ctx: Context
-    ) {
-        replace(0, length, data.translatedText)
-        val textEnd = length
+        ctx: Context,
+        adapter: WidgetChatListAdapterItemMessage,
+        messageEntry: MessageEntry,
+        message: Message
+    ): DraweeSpanStringBuilder {
+        val rendered = try {
+            renderTranslatedText(data.translatedText, ctx, adapter, messageEntry, message)
+        } catch (e: Exception) {
+            DebugLogger.log("renderTranslatedText failed: ${e.message}")
+            null
+        }
+
+        val builder = if (rendered is DraweeSpanStringBuilder) {
+            rendered
+        } else {
+            DraweeSpanStringBuilder().append(rendered ?: data.translatedText)
+        }
+
+        val textEnd = builder.length
         val label = " (${strings.actionTranslate}: ${data.sourceLanguage} → ${data.translatedLanguage})"
-        append(label)
-        setSpan(RelativeSizeSpan(0.75f), textEnd, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        setSpan(
+        builder.append(label)
+        builder.setSpan(RelativeSizeSpan(0.75f), textEnd, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        builder.setSpan(
             EditedMessageNode.Companion.`access$getForegroundColorSpan`(
                 EditedMessageNode.Companion, ctx
             ),
-            textEnd, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            textEnd, builder.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        return builder
+    }
+
+    // ── DiscordParser 内部方法（反射，缓存，避免每次渲染都查找）────
+    private var getSpoilerClickHandlerM: Method? = null
+    private var getMessageRenderContextM: Method? = null
+    private var getMessagePreprocessorM: Method? = null
+
+    private fun renderTranslatedText(
+        text: String,
+        ctx: Context,
+        adapter: WidgetChatListAdapterItemMessage,
+        messageEntry: MessageEntry,
+        message: Message
+    ): CharSequence? {
+        if (getSpoilerClickHandlerM == null) {
+            getSpoilerClickHandlerM = try {
+                WidgetChatListAdapterItemMessage::class.java
+                    .getDeclaredMethod("getSpoilerClickHandler", Message::class.java)
+                    .apply { isAccessible = true }
+            } catch (e: Exception) {
+                DebugLogger.log("getSpoilerClickHandler not found: ${e.message}")
+                null
+            }
+        }
+        if (getMessageRenderContextM == null) {
+            getMessageRenderContextM = try {
+                WidgetChatListAdapterItemMessage::class.java
+                    .getDeclaredMethod(
+                        "getMessageRenderContext",
+                        Context::class.java,
+                        MessageEntry::class.java,
+                        kotlin.jvm.functions.Function1::class.java
+                    )
+                    .apply { isAccessible = true }
+            } catch (e: Exception) {
+                DebugLogger.log("getMessageRenderContext not found: ${e.message}")
+                null
+            }
+        }
+        if (getMessagePreprocessorM == null) {
+            getMessagePreprocessorM = try {
+                WidgetChatListAdapterItemMessage::class.java
+                    .getDeclaredMethod(
+                        "getMessagePreprocessor",
+                        Long::class.java,
+                        Message::class.java,
+                        StoreMessageState.State::class.java
+                    )
+                    .apply { isAccessible = true }
+            } catch (e: Exception) {
+                DebugLogger.log("getMessagePreprocessor not found: ${e.message}")
+                null
+            }
+        }
+
+        val spoiler = getSpoilerClickHandlerM ?: return null
+        val renderCtxMethod = getMessageRenderContextM ?: return null
+        val preprocessorMethod = getMessagePreprocessorM ?: return null
+
+        val renderCtx = renderCtxMethod.invoke(
+            adapter, ctx, messageEntry, spoiler.invoke(adapter, message)
+        ) as MessageRenderContext
+        val preprocessor = preprocessorMethod.invoke(
+            adapter, adapter.adapter.data.userId, message, messageEntry.messageState
+        ) as MessagePreprocessor
+
+        return DiscordParser.parseChannelMessage(
+            ctx,
+            text,
+            renderCtx,
+            preprocessor,
+            if (message.isWebhook()) DiscordParser.ParserOptions.ALLOW_MASKED_LINKS
+            else DiscordParser.ParserOptions.DEFAULT,
+            false
         )
     }
 

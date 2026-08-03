@@ -19,6 +19,8 @@ interface IStrings {
 
     val settingsTitle: String
     val settingsBackendLabel: String
+    val settingsSectionLLM: String
+    val settingsSectionDebug: String
     val settingsBackendGoogle: String
     val settingsBackendLLM: String
     val settingsDefaultLanguage: String
