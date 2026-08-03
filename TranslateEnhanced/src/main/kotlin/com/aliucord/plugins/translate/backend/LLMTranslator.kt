@@ -362,11 +362,26 @@ class LLMTranslator(
             }
         }
 
-        for (rawLine in content.split("\n")) {
+        // 注意：不用 Kotlin 的 split("\n")（带默认参数，本项目编译环境下会报
+        // "No value passed for parameter 'p1'"），用手动按 \n 切分（Java 原生 API）
+        val lines = mutableListOf<String>()
+        var lineStart = 0
+        while (true) {
+            val nl = content.indexOf('\n', lineStart)
+            if (nl < 0) {
+                lines.add(content.substring(lineStart))
+                break
+            }
+            lines.add(content.substring(lineStart, nl))
+            lineStart = nl + 1
+        }
+
+        for (rawLine in lines) {
             val line = rawLine.trim()
             if (line.isEmpty()) continue
-            val m1 = lineRegex.find(line)
-            val m2 = if (m1 == null) looseRegex.find(line) else null
+            // 显式传 startIndex，避免默认参数合成桥接问题
+            val m1 = lineRegex.find(line, 0)
+            val m2 = if (m1 == null) looseRegex.find(line, 0) else null
             val m = m1 ?: m2
             if (m != null) {
                 flush()
