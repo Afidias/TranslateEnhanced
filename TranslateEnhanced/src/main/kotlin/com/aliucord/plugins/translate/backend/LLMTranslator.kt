@@ -186,6 +186,7 @@ class LLMTranslator(
             "return it unchanged." else ""
         return "Translate ${langPart}to $targetLang. " +
             "Only return the translated text, nothing else. " +
+            "Do not translate URLs (http/https links); preserve them verbatim. " +
             "Preserve any placeholder tokens like [[URL_0]], [[EMOJI_0]], [[TAG_0]] " +
             "exactly as they appear." +
             forceNote + "\n\n$text"

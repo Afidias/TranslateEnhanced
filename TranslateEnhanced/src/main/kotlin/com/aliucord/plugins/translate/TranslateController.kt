@@ -177,11 +177,18 @@ class TranslateController(
             }
         }
 
-        // 翻译成功后把占位符还原成原始内容（URL/emoji/Discord 标记等）
+        // 翻译成功后把占位符还原成原始内容（emoji/Discord 标记等）
         // （如果翻译引擎吞掉了占位符，restoreAll 会把缺失内容追加到译文末尾）
         if (result is TranslateResult.Success && cleaned.groups.isNotEmpty()) {
             result = result.copy(
                 translatedText = TextCleaner.restoreAll(result.translatedText, cleaned.groups)
+            )
+        }
+        // 链接校验补回：cleanUrl 关闭时链接随原文交给翻译引擎，
+        // 若某个链接被改写/丢失，这里把原始链接补到译文末尾
+        if (result is TranslateResult.Success && cleaned.urls.isNotEmpty()) {
+            result = result.copy(
+                translatedText = TextCleaner.ensureUrlsPresent(result.translatedText, cleaned.urls)
             )
         }
 

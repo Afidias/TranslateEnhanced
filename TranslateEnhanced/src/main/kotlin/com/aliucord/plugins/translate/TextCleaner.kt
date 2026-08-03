@@ -62,6 +62,7 @@ object TextCleaner {
     data class CleanResult(
         val text: String,
         val groups: List<PlaceholderGroup>,
+        val urls: List<String>,
         val hasRealText: Boolean
     )
 
@@ -77,7 +78,12 @@ object TextCleaner {
         var result = text.toRealString()
         val groups = mutableListOf<PlaceholderGroup>()
 
-        if (settings.getBool(SETTINGS_KEY_CLEAN_URL, true)) {
+        // 先记录原始链接（完整链接，含裁剪后的边界），翻译后用于校验/补回
+        val recordedUrls = collectUrls(result)
+
+        // cleanUrl 开启 = 占位保护模式：链接不参与翻译，译文原位还原
+        // 关闭（默认）= 链接随原文交给翻译引擎，翻译后校验补回
+        if (settings.getBool(SETTINGS_KEY_CLEAN_URL, false)) {
             val urls = mutableListOf<String>()
             result = replaceWithPlaceholders(
                 result, URL_REGEX, URL_PLACEHOLDER_PREFIX, urls, ::trimUrl
@@ -100,8 +106,10 @@ object TextCleaner {
         val trimmed = result.trim()
         // 铁律：绝不对管线里的值调用 Kotlin 内联字符串扩展（isBlank/isNotBlank），
         // R8 内联后会把混淆的 d0.d0.b 强转为 IntIterator 崩溃，这里只用 safeIsBlank
-        val hasRealText = !safeIsBlank(PLACEHOLDER_REGEX.replace(trimmed, ""))
-        return CleanResult(trimmed, groups, hasRealText)
+        val withoutPlaceholders = PLACEHOLDER_REGEX.replace(trimmed, "")
+        val withoutUrls = URL_REGEX.replace(withoutPlaceholders, "")
+        val hasRealText = !safeIsBlank(withoutUrls)
+        return CleanResult(trimmed, groups, recordedUrls, hasRealText)
     }
 
     /**
@@ -130,6 +138,22 @@ object TextCleaner {
             result
         } else {
             result.trimEnd() + " " + missing.joinToString(" ")
+        }
+    }
+
+    /**
+     * 翻译后校验：确保每个原始链接都出现在译文中。
+     *
+     * cleanUrl 关闭时链接直接交给翻译引擎（LLM 提示词要求原样保留，Google 原生保留）；
+     * 若某个链接仍被改写/丢失，追加到译文末尾，保证链接不丢。
+     */
+    fun ensureUrlsPresent(text: String, urls: List<String>): String {
+        if (urls.isEmpty()) return text
+        val missing = urls.filter { url -> url.length > 0 && text.indexOf(url) < 0 }
+        return if (missing.isEmpty()) {
+            text
+        } else {
+            text.trimEnd() + " " + missing.joinToString(" ")
         }
     }
 
@@ -169,6 +193,21 @@ object TextCleaner {
         }
         sb.append(input.substring(searchFrom))
         return sb.toString()
+    }
+
+    /** 按当前 URL 规则记录一条消息里的所有完整链接（裁剪尾部标点）。 */
+    private fun collectUrls(input: String): List<String> {
+        val urls = mutableListOf<String>()
+        var searchFrom = 0
+        while (true) {
+            val match = URL_REGEX.find(input, searchFrom) ?: break
+            val kept = trimUrl(match.value)
+            if (kept.length > 0) {
+                urls.add(kept)
+            }
+            searchFrom = match.range.last + 1
+        }
+        return urls
     }
 
     /** 去掉 URL 尾部常见的句子标点/闭合括号。 */

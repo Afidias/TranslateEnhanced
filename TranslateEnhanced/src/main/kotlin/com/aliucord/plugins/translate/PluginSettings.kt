@@ -95,7 +95,10 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         // ── 文本清理 ────────────────────────────────────────
         addHeader(ctx, strings.settingsCleaningLabel)
         addView(switchRow(ctx, strings.settingsCleanHtml, SETTINGS_KEY_CLEAN_HTML, true))
-        addView(switchRow(ctx, strings.settingsCleanUrl, SETTINGS_KEY_CLEAN_URL, true))
+        addView(switchRow(
+            ctx, strings.settingsCleanUrl, SETTINGS_KEY_CLEAN_URL, false,
+            subtext = strings.settingsCleanUrlDesc
+        ))
         addView(switchRow(ctx, strings.settingsCleanEmoji, SETTINGS_KEY_CLEAN_EMOJI, true))
 
         // ── 调试 ────────────────────────────────────────────
@@ -246,9 +249,10 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         label: String,
         key: String,
         default: Boolean,
+        subtext: CharSequence? = null,
         onToggle: ((Boolean) -> Unit)? = null
     ): CheckedSetting =
-        Utils.createCheckedSetting(ctx, CheckedSetting.ViewType.SWITCH, label, null).apply {
+        Utils.createCheckedSetting(ctx, CheckedSetting.ViewType.SWITCH, label, subtext).apply {
             isChecked = settings.getBool(key, default)
             setOnCheckedListener { v ->
                 settings.setBool(key, v)

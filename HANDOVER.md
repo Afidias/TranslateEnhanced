@@ -137,8 +137,9 @@ TranslateEnhanced/
 
 ### 4.2 `TranslateController.kt`（调度中心）
 - `translateSync()`：所有防御转换都先 `toRealString()`；空译文/异常视为失败；LLM 失败自动回退 Google 并在主线程 Toast 提示。
-- **内容还原**：`TextCleaner.clean()` 把 URL/emoji/Discord 标记（提及、自定义表情、时间戳、HTML）分别替换为 `[[URL_n]]` / `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。
-- **URL 截断**：`URL_REGEX` 会在 CJK/全角/emoji 等"不可能出现在 URL 里"的字符处截断，并裁剪尾部常见标点/闭合括号（如 `https://a.com/foo)。` → `https://a.com/foo`），避免中文无空格时把后续文本吞进链接。
+- **内容还原**：`TextCleaner.clean()` 把 emoji/Discord 标记（提及、自定义表情、时间戳、HTML）替换为 `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。
+- **URL 处理（默认不清洗）**：`cleanUrl` 默认关闭，链接随原文直接交给翻译引擎（LLM 提示词要求原样保留，Google 原生保留），译文由 `DiscordParser` 重新渲染时自动链接化。翻译前 `collectUrls()` 记录原始完整链接，翻译后 `ensureUrlsPresent()` 校验，被改写/丢失的链接自动补回译文末尾。
+- **URL 占位保护模式**：`cleanUrl` 开启时回到占位符方案（`[[URL_n]]`，链接不参与翻译、译文原位还原）。`URL_REGEX` 会在 CJK/全角/emoji 等字符处截断并裁剪尾部标点（如 `https://a.com/foo)。` → `https://a.com/foo`），避免中文无空格时把后续文本吞进链接。
 - `translateSync()` 支持 `force` 参数：`resolveBackend(force)` 会把 `forceRetranslate` 传给 LLM 后端；译文与原文相同时额外写一条 WARNING 日志，便于定位"原样返回"是模型回显还是文本本就在目标语言。
 - `translateAsync()`：异常时记录崩溃日志 + 在 Toast 开头带上崩溃位置（`@Class.method:line`），并清除占位符恢复原文。
 - `resolveBackend()`：直接把 `settings.getString(...)` 的原始返回值 `as Any` 传给 `LLMTranslator`（关键手法，见第 6 节），外层 try-catch 失败回退 Google。
@@ -146,6 +147,7 @@ TranslateEnhanced/
 ### 4.3 `backend/LLMTranslator.kt`（大模型后端）
 - **构造函数参数类型是 `Any` 不是 `String`**（见第 6 节），内部用 `toRealString()` 转真实字符串。
 - 新增 `forceRetranslate: Boolean = false` 构造参数：为 true 时 user prompt 追加"不要原样回显，若源文本已在目标语言则原样返回"的提示，用于"重新翻译"菜单项。
+- user prompt 明确要求：不翻译 URL（http/https 原样保留）、原样保留 `[[EMOJI_n]]` / `[[TAG_n]]` 等占位符。
 - 用 **原生 `HttpURLConnection`**，不用 Aliucord `Http`：
   - 原因：Aliucord `Http` 在 4xx/5xx 时读 `getInputStream()` 失败，抛无意义的 `"closed"`，掩盖真实错误。原生 `HttpURLConnection` 能读 `errorStream` 拿到真实错误。
 - `max_tokens` 1024（某些服务商限制 2048）。
@@ -190,7 +192,7 @@ TranslateEnhanced/
 |---|---|---|
 | `defaultLanguage` | 默认目标语言 | `zh-CN` |
 | `cleanHtml` | 翻译前去 HTML 标签 | `true` |
-| `cleanUrl` | 翻译前去 URL | `true` |
+| `cleanUrl` | 链接保护：开启=占位保护（链接不参与翻译、原位还原）；关闭=链接交给翻译引擎并校验补回 | `false` |
 | `cleanEmoji` | 翻译前去 Emoji | `true` |
 | `backend` | `google` / `llm` | `google` |
 | `llmBaseUrl` | 大模型 Base URL | `""` |
@@ -319,7 +321,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 
 - "译文和原文相同（原样返回）"问题：根因未定（可能是模型回显、温度 0、或文本本就在目标语言）。目前已有两个兜底手段：消息菜单"重新翻译"（强制重翻 + 防回显提示）和译文与原文相同时的 WARNING 日志。若需彻底定位，让用户开 Debug Mode 回传 `translate.log`。
 - **译文渲染依赖 Discord 内部 API**：`buildTranslatedBuilder()` 用 `DiscordParser.parseChannelMessage` + 反射调用 `WidgetChatListAdapterItemMessage` 的 `getMessageRenderContext/getMessagePreprocessor/getSpoilerClickHandler` 重渲染译文（URL 可点击、emoji/提及/时间戳原生显示）；Discord 升级改签名时自动回退纯文本显示。
-- 占位符（`[[URL_n]]` / `[[EMOJI_n]]` / `[[TAG_n]]`）依赖翻译引擎原样保留：Google 通常保留括号 token，LLM 侧已把"保留占位符"写进 user prompt；若仍被改写，`restoreAll()` 会把缺失内容追加到译文末尾。
+- 占位符（`[[EMOJI_n]]` / `[[TAG_n]]`）依赖翻译引擎原样保留：Google 通常保留括号 token，LLM 侧已把"保留占位符"写进 user prompt；若仍被改写，`restoreAll()` 会把缺失内容追加到译文末尾。URL 默认不占位，靠引擎保留 + `ensureUrlsPresent()` 补回。
 - 设置页使用 Discord 原生组件（`CheckedSetting` 单选/开关、`UiKit_Settings_Item_Header/Icon` 样式、Discord 主题色），LLM 配置区随后端选择动态显隐。
 - 大模型返回仅 `.trim()`，未处理模型可能夹带的 markdown/代码块包裹（如 ```json），如需可加后处理。
 - 自动翻译依赖 `onNewMessage` patch 的签名 `(Long, Long, Long)`，Discord 升级可能改签名，需重新适配。

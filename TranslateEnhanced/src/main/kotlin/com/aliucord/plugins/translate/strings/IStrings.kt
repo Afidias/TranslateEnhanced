@@ -30,6 +30,7 @@ interface IStrings {
     val settingsLLMModel: String
     val settingsCleanHtml: String
     val settingsCleanUrl: String
+    val settingsCleanUrlDesc: String
     val settingsCleanEmoji: String
     val settingsSupportedLanguages: String
     val settingsCleaningLabel: String
