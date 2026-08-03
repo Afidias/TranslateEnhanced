@@ -18,6 +18,7 @@ internal const val SETTINGS_KEY_LLM_API_KEY      = "llmApiKey"
 internal const val SETTINGS_KEY_LLM_MODEL        = "llmModel"
 internal const val SETTINGS_KEY_LLM_SYSTEM_PROMPT = "llmSystemPrompt"
 internal const val SETTINGS_KEY_DEBUG_MODE        = "debugMode"
+internal const val SETTINGS_KEY_AUTO_TRANSLATE_SELF = "autoTranslateSelf"
 
 internal const val CMD_NAME = "translate"
 

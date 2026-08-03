@@ -144,6 +144,7 @@ TranslateEnhanced/
 ### 4.2 `TranslateController.kt`（调度中心）
 - `translateSync()`：所有防御转换都先 `toRealString()`；空译文/异常视为失败；LLM 失败自动回退 Google 并在主线程 Toast 提示。
 - **自动翻译批量合并**：`enqueueAutoTranslate()` 把待翻译消息放进队列，延迟 1s 后由单线程调度器 flush（每次最多 10 条、单条 ≤1500 字符，超限走单条）；LLM 后端合并为一次请求，Google 后端逐条。`finalizeAutoItem()` 统一还原占位符/链接、降级 Google、缓存、刷新、记录成功/失败并释放 pending。手动翻译不走批量，保持即时。
+- **自动翻译进度 toast**：批量开始/请求后端/本批完成三个阶段都有 toast，`showAutoToast()` 限频（默认 2.5s 间隔），避免历史批量翻译时刷屏。
 - **内容还原**：`TextCleaner.clean()` 把 emoji/Discord 标记（提及、自定义表情、时间戳、HTML）替换为 `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。
 - **URL 处理（默认不清洗）**：`cleanUrl` 默认关闭，链接随原文直接交给翻译引擎（LLM 提示词要求原样保留，Google 原生保留），译文由 `DiscordParser` 重新渲染时自动链接化。翻译前 `collectUrls()` 记录原始完整链接，翻译后 `ensureUrlsPresent()` 校验，被改写/丢失的链接自动补回译文末尾。
 - **URL 占位保护模式**：`cleanUrl` 开启时回到占位符方案（`[[URL_n]]`，链接不参与翻译、译文原位还原）。`URL_REGEX` 会在 CJK/全角/emoji 等字符处截断并裁剪尾部标点（如 `https://a.com/foo)。` → `https://a.com/foo`），避免中文无空格时把后续文本吞进链接。
@@ -208,6 +209,7 @@ TranslateEnhanced/
 | `llmModel` | 模型名 | `gpt-4o-mini` |
 | `llmSystemPrompt` | 系统提示词 | `DEFAULT_SYSTEM_PROMPT` |
 | `debugMode` | 调试开关 | `false` |
+| `autoTranslateSelf` | 自动翻译时是否翻译自己发送的消息 | `false` |
 
 > 自动翻译频道开关是动态 key：`autoTranslate_enabled_{channelId}`。
 

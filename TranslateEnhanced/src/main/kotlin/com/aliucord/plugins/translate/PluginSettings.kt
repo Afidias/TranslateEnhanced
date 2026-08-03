@@ -92,6 +92,13 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         }
         addView(langRow)
 
+        // ── 自动翻译 ────────────────────────────────────────
+        addHeader(ctx, strings.settingsSectionAuto)
+        addView(switchRow(
+            ctx, strings.settingsAutoTranslateSelf, SETTINGS_KEY_AUTO_TRANSLATE_SELF, false,
+            subtext = strings.settingsAutoTranslateSelfDesc
+        ))
+
         // ── 文本清理 ────────────────────────────────────────
         addHeader(ctx, strings.settingsCleaningLabel)
         addView(switchRow(ctx, strings.settingsCleanHtml, SETTINGS_KEY_CLEAN_HTML, true))

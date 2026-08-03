@@ -14,6 +14,11 @@ interface IStrings {
     val toastAutoPaused: String
     val toastAutoResumed: String
     val toastAutoDisabled: String
+    val toastAutoBatchStart: String
+    val toastAutoBatchRequesting: String
+    val toastAutoBatchRequestingEnd: String
+    val toastAutoBatchDonePrefix: String
+    val toastAutoBatchDoneSuffix: String
     val toastBackendFallback: String
     val toastTranslateFailed: String
     val toastTranslateError: String
@@ -21,6 +26,7 @@ interface IStrings {
     val settingsTitle: String
     val settingsBackendLabel: String
     val settingsSectionLLM: String
+    val settingsSectionAuto: String
     val settingsSectionDebug: String
     val settingsBackendGoogle: String
     val settingsBackendLLM: String
@@ -33,6 +39,8 @@ interface IStrings {
     val settingsCleanUrl: String
     val settingsCleanUrlDesc: String
     val settingsCleanEmoji: String
+    val settingsAutoTranslateSelf: String
+    val settingsAutoTranslateSelfDesc: String
     val settingsSupportedLanguages: String
     val settingsCleaningLabel: String
     val settingsCancel: String

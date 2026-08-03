@@ -166,9 +166,10 @@ class Translate : Plugin() {
                     return@submit
                 }
 
-                // 跳过自己发送的消息
+                // 默认跳过自己发送的消息（设置页可开启翻译自己的消息）
                 val myId = StoreStream.getUsers().getMe().getId()
-                if (message?.author?.id == myId) {
+                if (message?.author?.id == myId &&
+                    !settings.getBool(SETTINGS_KEY_AUTO_TRANSLATE_SELF, false)) {
                     DebugLogger.log("auto skip: own message ($messageId)")
                     return@submit
                 }

@@ -62,6 +62,10 @@ class TranslateController(
     @Volatile
     private var batchScheduler: ScheduledExecutorService? = null
 
+    /** 自动翻译进度 toast 限频：避免批量历史翻译时刷屏。 */
+    @Volatile
+    private var lastAutoToastAt = 0L
+
     private var chatList: WidgetChatList? = null
 
     /** 自动翻译批量条目（清理后的文本 + 原始文本 + 还原所需数据）。 */
@@ -356,7 +360,11 @@ class TranslateController(
      * 只有自动翻译路径使用；手动翻译保持单条即时。
      */
     fun enqueueAutoTranslate(item: AutoBatchItem) {
+        val firstOfBatch = autoBatchQueue.isEmpty()
         autoBatchQueue.add(item)
+        if (firstOfBatch) {
+            showAutoToast(strings.toastAutoBatchStart)
+        }
         if (!batchFlushScheduled) {
             batchFlushScheduled = true
             try {
@@ -382,6 +390,7 @@ class TranslateController(
         }
         if (items.isEmpty()) return
         DebugLogger.log("auto batch: flushing ${items.size} messages")
+        showAutoToast(strings.toastAutoBatchRequesting + items.size + strings.toastAutoBatchRequestingEnd)
 
         val backend = try {
             resolveBackend(false)
@@ -428,6 +437,7 @@ class TranslateController(
                 }
             }
         }
+        showAutoToast(strings.toastAutoBatchDonePrefix + items.size + strings.toastAutoBatchDoneSuffix)
 
         // 一次 flush 最多处理 AUTO_BATCH_MAX_ITEMS 条；还有积压则安排下一次 flush
         if (!autoBatchQueue.isEmpty() && !batchFlushScheduled) {
@@ -440,6 +450,16 @@ class TranslateController(
             } catch (e: Exception) {
                 batchFlushScheduled = false
             }
+        }
+    }
+
+    /** 自动翻译进度 toast（限频：两次之间至少间隔 [AUTO_TOAST_MIN_INTERVAL_MS]）。 */
+    private fun showAutoToast(message: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoToastAt < AUTO_TOAST_MIN_INTERVAL_MS) return
+        lastAutoToastAt = now
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            onShowToast(message, false)
         }
     }
 
@@ -529,6 +549,7 @@ class TranslateController(
         private const val AUTO_BATCH_DELAY_MS = 1000L
         private const val AUTO_BATCH_MAX_ITEMS = 10
         private const val AUTO_BATCH_MAX_ITEM_CHARS = 1500
+        private const val AUTO_TOAST_MIN_INTERVAL_MS = 2500L
         private const val ERROR_EMPTY_AFTER_CLEAN = "Nothing to translate after cleaning."
         private const val ERROR_EMPTY_TRANSLATION = "Backend returned an empty translation."
         private const val ERROR_BACKEND_EXCEPTION = "Translation backend error: "
