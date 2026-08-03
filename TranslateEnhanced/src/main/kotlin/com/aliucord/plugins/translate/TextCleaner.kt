@@ -38,17 +38,20 @@ object TextCleaner {
 
         // 先抽 URL：用占位符替换而不是删除，翻译后可以按原位置还原
         if (settings.getBool(SETTINGS_KEY_CLEAN_URL, true)) {
-            val sb = StringBuilder(result.length)
-            var last = 0
+            val sb = StringBuilder()
+            var searchFrom = 0
             var index = 0
-            for (match in URL_REGEX.findAll(result)) {
-                sb.append(result, last, match.range.first)
+            // 注意：不用 findAll(result)（依赖默认参数的合成桥接，本项目编译环境下报
+            // "No value passed for parameter 'p1'"），改用显式传参的 find(input, startIndex)
+            while (true) {
+                val match = URL_REGEX.find(result, searchFrom) ?: break
+                sb.append(result.substring(searchFrom, match.range.first))
                 sb.append(urlPlaceholder(index))
                 urls.add(match.value)
                 index++
-                last = match.range.last + 1
+                searchFrom = match.range.last + 1
             }
-            sb.append(result, last, result.length)
+            sb.append(result.substring(searchFrom))
             result = sb.toString()
         }
 
@@ -75,7 +78,7 @@ object TextCleaner {
 
         urls.forEachIndexed { i, url ->
             val token = urlPlaceholder(i)
-            if (token in result) {
+            if (result.indexOf(token) >= 0) {
                 result = result.replace(token, url)
             } else {
                 missing.add(url)
