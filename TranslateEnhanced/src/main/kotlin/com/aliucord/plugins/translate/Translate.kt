@@ -98,105 +98,135 @@ class Translate : Plugin() {
                 val channelId = apiMessage.g()   // api Message 混淆方法：g() = channelId
                 val messageId = apiMessage.o()   // o() = messageId
                 DebugLogger.log("handleMessageCreate: channel=$channelId message=$messageId")
+                maybeAutoTranslate(channelId, messageId)
+            }
+        )
+    }
 
-                if (!autoManager.isEnabled(channelId)) {
-                    DebugLogger.log("auto skip: channel not enabled ($channelId)")
-                    return@Hook
+    /**
+     * 自动翻译统一入口：新消息到达、历史消息渲染/滚动加载都会调用。
+     * 前置检查在主线程完成（都是内存状态，开销极小），翻译任务提交到插件线程池。
+     */
+    private fun maybeAutoTranslate(channelId: Long, messageId: Long) {
+        if (!autoManager.isEnabled(channelId)) {
+            DebugLogger.log("auto skip: channel not enabled ($channelId)")
+            return
+        }
+        if (autoManager.isPaused(channelId)) {
+            DebugLogger.log("auto skip: channel paused ($channelId)")
+            return
+        }
+
+        // 已在翻译中或已有译文的消息跳过，避免重复翻译
+        if (controller.getCached(messageId) != null) {
+            DebugLogger.log("auto skip: already translated ($messageId)")
+            return
+        }
+        if (!controller.beginTranslate(messageId)) {
+            DebugLogger.log("auto skip: already translating ($messageId)")
+            return
+        }
+
+        // 异步读取消息并翻译（用插件自有线程池，避免每条消息新建线程）
+        controller.submit {
+            try {
+                val message = StoreStream.getMessages().getMessage(channelId, messageId)
+                val content = message?.content
+                if (content == null) {
+                    DebugLogger.log("auto skip: message not found in store ($messageId)")
+                    return@submit
                 }
-                if (autoManager.isPaused(channelId)) {
-                    DebugLogger.log("auto skip: channel paused ($channelId)")
-                    return@Hook
+                // 防御：混淆后的消息内容可能不是真实 String，先转换再做字符串操作
+                val safeContent = content.toRealString()
+                if (safeIsBlank(safeContent)) {
+                    DebugLogger.log("auto skip: empty content ($messageId)")
+                    return@submit
                 }
 
-                // 已在翻译中或已有译文的消息跳过，避免重复翻译
-                if (controller.getCached(messageId) != null) {
-                    DebugLogger.log("auto skip: already translated ($messageId)")
-                    return@Hook
-                }
-                if (!controller.beginTranslate(messageId)) {
-                    DebugLogger.log("auto skip: already translating ($messageId)")
-                    return@Hook
+                // 清理后没有可翻译文本（例如只有表情/链接/提及的消息）直接跳过，不计数失败
+                if (!TextCleaner.clean(safeContent, settings).hasRealText) {
+                    DebugLogger.log("auto skip: no real text after cleaning ($messageId)")
+                    return@submit
                 }
 
-                // 异步读取消息并翻译（用插件自有线程池，避免每条消息新建线程）
-                controller.submit {
-                    try {
-                        val message = StoreStream.getMessages().getMessage(channelId, messageId)
-                        val content = message?.content
-                        if (content == null) {
-                            DebugLogger.log("auto skip: message not found in store ($messageId)")
-                            return@submit
-                        }
-                        // 防御：混淆后的消息内容可能不是真实 String，先转换再做字符串操作
-                        val safeContent = content.toRealString()
-                        if (safeIsBlank(safeContent)) {
-                            DebugLogger.log("auto skip: empty content ($messageId)")
-                            return@submit
-                        }
+                // 跳过自己发送的消息
+                val myId = StoreStream.getUsers().getMe().getId()
+                if (message?.author?.id == myId) {
+                    DebugLogger.log("auto skip: own message ($messageId)")
+                    return@submit
+                }
 
-                        // 清理后没有可翻译文本（例如只有表情/链接/提及的消息）直接跳过，不计数失败
-                        if (!TextCleaner.clean(safeContent, settings).hasRealText) {
-                            DebugLogger.log("auto skip: no real text after cleaning ($messageId)")
-                            return@submit
-                        }
+                val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
-                        // 跳过自己发送的消息
-                        val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()
-                        if (message?.author?.id == myId) {
-                            DebugLogger.log("auto skip: own message ($messageId)")
-                            return@submit
-                        }
+                // 语言检测：跳过目标语言的消息
+                if (!LanguageDetector.shouldTranslate(safeContent, targetLang)) {
+                    DebugLogger.log("auto skip: already target language ($messageId)")
+                    return@submit
+                }
 
-                        val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
+                val result = controller.translateSync(
+                    text = safeContent,
+                    targetLang = targetLang,
+                    channelId = channelId,
+                    messageId = messageId
+                )
 
-                        // 语言检测：跳过目标语言的消息
-                        if (!LanguageDetector.shouldTranslate(safeContent, targetLang)) {
-                            DebugLogger.log("auto skip: already target language ($messageId)")
-                            return@submit
-                        }
-
-                        val result = controller.translateSync(
-                            text = safeContent,
-                            targetLang = targetLang,
-                            channelId = channelId,
-                            messageId = messageId
-                        )
-
-                        when (result) {
-                            is TranslateResult.Success -> {
-                                autoManager.recordSuccess(channelId)
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                    chatList?.let { list ->
-                                        list.forceRerenderMessage(messageId)
-                                    }
-                                }
+                when (result) {
+                    is TranslateResult.Success -> {
+                        autoManager.recordSuccess(channelId)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            chatList?.let { list ->
+                                list.forceRerenderMessage(messageId)
                             }
-                            is TranslateResult.Error -> {
-                                val justPaused = autoManager.recordFailure(channelId)
-                                if (justPaused) {
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        Utils.showToast(strings.toastAutoPaused, true)
-                                    }
-                                }
-                            }
                         }
-                    } catch (e: Exception) {
-                        // 自动翻译线程中的异常也计入失败并记录，避免被静默吞掉
-                        DebugLogger.log("Auto translate exception: ${e.message}")
-                        DebugLogger.log("at: " + (e.stackTrace?.take(8)?.joinToString(" <- ") { it.toString() } ?: "?"))
-                        DebugLogger.logCrash("auto", e)
+                    }
+                    is TranslateResult.Error -> {
                         val justPaused = autoManager.recordFailure(channelId)
                         if (justPaused) {
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 Utils.showToast(strings.toastAutoPaused, true)
                             }
                         }
-                    } finally {
-                        controller.endTranslate(messageId)
                     }
                 }
+            } catch (e: Exception) {
+                // 自动翻译线程中的异常也计入失败并记录，避免被静默吞掉
+                DebugLogger.log("Auto translate exception: ${e.message}")
+                DebugLogger.log("at: " + (e.stackTrace?.take(8)?.joinToString(" <- ") { it.toString() } ?: "?"))
+                DebugLogger.logCrash("auto", e)
+                val justPaused = autoManager.recordFailure(channelId)
+                if (justPaused) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Utils.showToast(strings.toastAutoPaused, true)
+                    }
+                }
+            } finally {
+                controller.endTranslate(messageId)
             }
-        )
+        }
+    }
+
+    /**
+     * 开启自动翻译时，立即翻译当前已加载的历史消息（含不可见但已加载的）。
+     * 滚动加载的更多历史消息由 processMessageText 渲染时触发。
+     */
+    private fun translateChannelHistory(channelId: Long) {
+        val list = chatList ?: return
+        try {
+            val adapter = WidgetChatList.`access$getAdapter$p`(list)
+            val data = adapter.internalData
+            var checked = 0
+            for (entry in data) {
+                if (entry !is MessageEntry) continue
+                val msg = entry.message ?: continue
+                if (msg.channelId != channelId) continue
+                maybeAutoTranslate(channelId, msg.id)
+                checked++
+            }
+            DebugLogger.log("translateChannelHistory: channel=$channelId checked=$checked")
+        } catch (e: Exception) {
+            DebugLogger.log("translateChannelHistory failed: ${e.message}")
+        }
     }
 
     private fun patchProcessMessageText() {
@@ -212,6 +242,11 @@ class Translate : Plugin() {
                 val messageEntry = it.args[1] as MessageEntry
                 val message = messageEntry.message ?: return@Hook
                 val id = message.id
+
+                // 自动翻译开启的频道：渲染中的消息（历史消息/滚动加载）也触发翻译
+                if (autoManager.isEnabled(message.channelId) && !autoManager.isPaused(message.channelId)) {
+                    maybeAutoTranslate(message.channelId, id)
+                }
 
                 // 加载态：显示"翻译中..."
                 if (controller.isLoading(id)) {
@@ -464,6 +499,8 @@ class Translate : Plugin() {
                             } else {
                                 autoManager.toggle(channelId)
                             }
+                            // 开启/恢复时立即翻译当前已加载的历史消息
+                            if (nowOn) translateChannelHistory(channelId)
                             Utils.showToast(
                                 if (nowOn) strings.toastAutoResumed else strings.toastAutoPaused
                             )

@@ -130,7 +130,11 @@ TranslateEnhanced/
 - `@AliucordPlugin` 注解，`settingsTab` 指向 `PluginSettings`。
 - `load()`：初始化 `TranslateController`、`AutoTranslateManager`、debug 模式。
 - `start()`：打 4 个 patch。
-- **自动翻译入口**：hook `StoreStream.handleMessageCreate(com.discord.api.message.Message)`（`g()`=channelId、`o()`=messageId）。⚠️ 旧代码 hook 的 `WidgetChatList.onNewMessage` 在 Discord 126021 中**已不存在**，patch 会静默失败，自动翻译完全失效——这是已修复的历史坑。
+- **自动翻译入口**：统一入口 `maybeAutoTranslate(channelId, messageId)`，三个触发源：
+  1. `StoreStream.handleMessageCreate(api Message)`（新消息，`g()`=channelId、`o()`=messageId）；
+  2. `processMessageText` 渲染任意消息时（**历史消息/滚动加载**也会翻译）；
+  3. 菜单开启自动翻译时 `translateChannelHistory()` 扫描当前已加载列表。
+  ⚠️ 旧代码 hook 的 `WidgetChatList.onNewMessage` 在 Discord 126021 中**已不存在**，patch 会静默失败，自动翻译完全失效——这是已修复的历史坑。
 - **编辑检测**：`patchProcessMessageText` 里比较 `data.sourceText` 与 `message.content.toRealString()`，不一致（消息被编辑）就 `invalidate(id)` 显示原文。
 - 消息菜单新增"翻译 / 显示原文 / 重新翻译"按钮，以及自动翻译开关/恢复按钮。
   - "重新翻译"仅在已有译文缓存时显示：绕过旧译文强制重新调用后端（`force = true`），
@@ -321,6 +325,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 ## 11. 已知问题 / TODO
 
 - "译文和原文相同（原样返回）"问题：根因未定（可能是模型回显、温度 0、或文本本就在目标语言）。目前已有两个兜底手段：消息菜单"重新翻译"（强制重翻 + 防回显提示）和译文与原文相同时的 WARNING 日志。若需彻底定位，让用户开 Debug Mode 回传 `translate.log`。
+- 历史消息翻译依赖消息被渲染（滚动到可见）才会触发；译文缓存 LRU 上限 300 条，长历史大幅滚动后旧译文可能被淘汰并触发重新翻译（涉及 API 配额，暂未做持久化去重）。
 - **译文渲染依赖 Discord 内部 API**：`buildTranslatedBuilder()` 用 `DiscordParser.parseChannelMessage` + 反射调用 `WidgetChatListAdapterItemMessage` 的 `getMessageRenderContext/getMessagePreprocessor/getSpoilerClickHandler` 重渲染译文（URL 可点击、emoji/提及/时间戳原生显示）；Discord 升级改签名时自动回退纯文本显示。
 - 占位符（`[[EMOJI_n]]` / `[[TAG_n]]`）依赖翻译引擎原样保留：Google 通常保留括号 token，LLM 侧已把"保留占位符"写进 user prompt；若仍被改写，`restoreAll()` 会把缺失内容追加到译文末尾。URL 默认不占位，靠引擎保留 + `ensureUrlsPresent()` 补回。
 - 设置页使用 Discord 原生组件（`CheckedSetting` 单选/开关、`UiKit_Settings_Item_Header/Icon` 样式、Discord 主题色），LLM 配置区随后端选择动态显隐。
