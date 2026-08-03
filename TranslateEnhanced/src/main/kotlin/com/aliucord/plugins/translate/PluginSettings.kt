@@ -266,7 +266,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         TextInputLayout(ctx).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setPadding(0, 8, 0, 8)
-            setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_FILL)
+            setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_FILLED)
             setBoxBackgroundColor(ColorCompat.getThemedColor(ctx, R.b.colorBackgroundSecondary))
             setDefaultHintTextColor(ColorStateList.valueOf(ColorCompat.getThemedColor(ctx, R.b.colorHeaderSecondary)))
             this.hint = hint

@@ -236,7 +236,7 @@ class Translate : Plugin() {
         val builder = if (rendered is DraweeSpanStringBuilder) {
             rendered
         } else {
-            DraweeSpanStringBuilder().append(rendered ?: data.translatedText)
+            DraweeSpanStringBuilder().apply { append(rendered ?: data.translatedText) }
         }
 
         val textEnd = builder.length
