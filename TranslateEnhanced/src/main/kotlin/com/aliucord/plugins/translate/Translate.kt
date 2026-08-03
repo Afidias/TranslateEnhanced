@@ -26,6 +26,7 @@ import com.aliucord.plugins.translate.utils.DebugLogger
 import com.discord.api.commands.ApplicationCommandType
 import com.discord.databinding.WidgetChatListActionsBinding
 import com.discord.models.message.Message
+import com.discord.stores.StoreStream
 import com.discord.stores.StoreMessageState
 import com.discord.utilities.textprocessing.DiscordParser
 import com.discord.utilities.textprocessing.MessagePreprocessor
@@ -86,43 +87,73 @@ class Translate : Plugin() {
         })
 
         // 拦截新消息到达，触发自动翻译
+        // 注意：Discord 126021 的 WidgetChatList 已经没有 onNewMessage（旧版遗留，patch 会静默失败），
+        // 所有新消息（含私聊）统一走 StoreStream.handleMessageCreate(api Message)
         patcher.patch(
-            WidgetChatList::class.java,
-            "onNewMessage",
-            arrayOf(Long::class.java, Long::class.java, Long::class.java),
+            StoreStream::class.java,
+            "handleMessageCreate",
+            arrayOf(com.discord.api.message.Message::class.java),
             Hook { hookParam ->
-                val channelId = hookParam.args[0] as Long
-                val messageId = hookParam.args[2] as Long
+                val apiMessage = hookParam.args[0] as com.discord.api.message.Message
+                val channelId = apiMessage.g()   // api Message 混淆方法：g() = channelId
+                val messageId = apiMessage.o()   // o() = messageId
+                DebugLogger.log("handleMessageCreate: channel=$channelId message=$messageId")
 
-                if (!autoManager.isEnabled(channelId)) return@Hook
-                if (autoManager.isPaused(channelId)) return@Hook
+                if (!autoManager.isEnabled(channelId)) {
+                    DebugLogger.log("auto skip: channel not enabled ($channelId)")
+                    return@Hook
+                }
+                if (autoManager.isPaused(channelId)) {
+                    DebugLogger.log("auto skip: channel paused ($channelId)")
+                    return@Hook
+                }
 
                 // 已在翻译中或已有译文的消息跳过，避免重复翻译
-                if (controller.getCached(messageId) != null) return@Hook
-                if (!controller.beginTranslate(messageId)) return@Hook
+                if (controller.getCached(messageId) != null) {
+                    DebugLogger.log("auto skip: already translated ($messageId)")
+                    return@Hook
+                }
+                if (!controller.beginTranslate(messageId)) {
+                    DebugLogger.log("auto skip: already translating ($messageId)")
+                    return@Hook
+                }
 
                 // 异步读取消息并翻译（用插件自有线程池，避免每条消息新建线程）
                 controller.submit {
                     try {
-                        val message = com.discord.stores.StoreStream
-                            .getMessages()
-                            .getMessage(channelId, messageId)
-                        val content = message?.content ?: return@submit
+                        val message = StoreStream.getMessages().getMessage(channelId, messageId)
+                        val content = message?.content
+                        if (content == null) {
+                            DebugLogger.log("auto skip: message not found in store ($messageId)")
+                            return@submit
+                        }
                         // 防御：混淆后的消息内容可能不是真实 String，先转换再做字符串操作
                         val safeContent = content.toRealString()
-                        if (safeIsBlank(safeContent)) return@submit
+                        if (safeIsBlank(safeContent)) {
+                            DebugLogger.log("auto skip: empty content ($messageId)")
+                            return@submit
+                        }
 
                         // 清理后没有可翻译文本（例如只有表情/链接/提及的消息）直接跳过，不计数失败
-                        if (!TextCleaner.clean(safeContent, settings).hasRealText) return@submit
+                        if (!TextCleaner.clean(safeContent, settings).hasRealText) {
+                            DebugLogger.log("auto skip: no real text after cleaning ($messageId)")
+                            return@submit
+                        }
 
                         // 跳过自己发送的消息
                         val myId = com.discord.stores.StoreStream.getUsers().getMe().getId()
-                        if (message?.author?.id == myId) return@submit
+                        if (message?.author?.id == myId) {
+                            DebugLogger.log("auto skip: own message ($messageId)")
+                            return@submit
+                        }
 
                         val targetLang = settings.safeGetString(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
 
                         // 语言检测：跳过目标语言的消息
-                        if (!LanguageDetector.shouldTranslate(safeContent, targetLang)) return@submit
+                        if (!LanguageDetector.shouldTranslate(safeContent, targetLang)) {
+                            DebugLogger.log("auto skip: already target language ($messageId)")
+                            return@submit
+                        }
 
                         val result = controller.translateSync(
                             text = safeContent,

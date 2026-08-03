@@ -94,7 +94,7 @@ TranslateEnhanced/
         │
         ▼
   Translate.kt（patcher 注入）
-   ├─ patchChatList()         → onNewMessage：自动翻译入口
+   ├─ patchChatList()         → StoreStream.handleMessageCreate：自动翻译入口
    ├─ patchProcessMessageText → 渲染"翻译中..."/译文/原文
    ├─ patchMessageContextMenu → 注入"翻译/显示原文/自动翻译"按钮
    └─ registerTranslateCommand → /translate 斜杠命令
@@ -130,6 +130,7 @@ TranslateEnhanced/
 - `@AliucordPlugin` 注解，`settingsTab` 指向 `PluginSettings`。
 - `load()`：初始化 `TranslateController`、`AutoTranslateManager`、debug 模式。
 - `start()`：打 4 个 patch。
+- **自动翻译入口**：hook `StoreStream.handleMessageCreate(com.discord.api.message.Message)`（`g()`=channelId、`o()`=messageId）。⚠️ 旧代码 hook 的 `WidgetChatList.onNewMessage` 在 Discord 126021 中**已不存在**，patch 会静默失败，自动翻译完全失效——这是已修复的历史坑。
 - **编辑检测**：`patchProcessMessageText` 里比较 `data.sourceText` 与 `message.content.toRealString()`，不一致（消息被编辑）就 `invalidate(id)` 显示原文。
 - 消息菜单新增"翻译 / 显示原文 / 重新翻译"按钮，以及自动翻译开关/恢复按钮。
   - "重新翻译"仅在已有译文缓存时显示：绕过旧译文强制重新调用后端（`force = true`），
@@ -324,7 +325,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 - 占位符（`[[EMOJI_n]]` / `[[TAG_n]]`）依赖翻译引擎原样保留：Google 通常保留括号 token，LLM 侧已把"保留占位符"写进 user prompt；若仍被改写，`restoreAll()` 会把缺失内容追加到译文末尾。URL 默认不占位，靠引擎保留 + `ensureUrlsPresent()` 补回。
 - 设置页使用 Discord 原生组件（`CheckedSetting` 单选/开关、`UiKit_Settings_Item_Header/Icon` 样式、Discord 主题色），LLM 配置区随后端选择动态显隐。
 - 大模型返回仅 `.trim()`，未处理模型可能夹带的 markdown/代码块包裹（如 ```json），如需可加后处理。
-- 自动翻译依赖 `onNewMessage` patch 的签名 `(Long, Long, Long)`，Discord 升级可能改签名，需重新适配。
+- 自动翻译依赖 `StoreStream.handleMessageCreate(api Message)`（store 层消息创建入口，比 WidgetChatList 稳定），Discord 升级仍可能改名/改参数，需重新适配。
 - `patchProcessMessageText` 依赖 `SimpleDraweeSpanTextView.mDraweeStringBuilder` 字段名，Discord 升级可能改名。
 - `forceRerenderMessage` 依赖 `WidgetChatList.access$getAdapter$p` 合成访问器，版本升级可能失效（已 try-catch 兜底）。
 - `fetch_models` 仅支持 OpenAI 标准 `/v1/models`，非标服务商需自行适配。
