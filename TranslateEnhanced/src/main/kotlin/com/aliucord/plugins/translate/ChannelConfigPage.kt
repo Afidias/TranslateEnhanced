@@ -180,7 +180,7 @@ class ChannelConfigPage(
         TextInputEditText(ctx).apply {
             setText(value)
             hint = hintText
-            singleLine = true
+            setSingleLine(true)
             textSize = 14f
             setPadding(dp(ctx, 8), 0, dp(ctx, 8), 0)
             setTextColor(ColorCompat.getThemedColor(ctx, R.b.colorHeaderPrimary))

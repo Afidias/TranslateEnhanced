@@ -33,7 +33,7 @@ object ChannelDisplayResolver {
                     )
                 }
                 channel.isDM() -> {
-                    var name = channel.name.toRealString()
+                    var name = getChannelName(channel)
                     if (name.isEmpty()) {
                         name = recipients.joinToString(", ") { CoreUser(it).username.toRealString() }
                     }
@@ -45,17 +45,28 @@ object ChannelDisplayResolver {
                 }
                 channel.isGuild() -> {
                     val guild = StoreStream.getGuilds().getGuild(channel.guildId)
-                    val channelName = channel.name.toRealString()
+                    val channelName = getChannelName(channel)
                     ChannelDisplayInfo(
                         if (channelName.isEmpty()) channelId.toString() else "#" + channelName,
                         (guild?.name.toRealString().takeIf { it.isNotEmpty() } ?: "Server") + " · " + channelId,
                         guild?.let { IconUtils.getForGuild(it.id, it.icon, it.icon, false) }
                     )
                 }
-                else -> ChannelDisplayInfo(channel.name.toRealString().ifEmpty { channelId.toString() }, channelId.toString(), null)
+                else -> ChannelDisplayInfo(getChannelName(channel).ifEmpty { channelId.toString() }, channelId.toString(), null)
             }
         } catch (e: Throwable) {
             ChannelDisplayInfo(channelId.toString(), "", null)
+        }
+    }
+
+    /** Channel.name is private in the Discord 126021 compile stubs. */
+    private fun getChannelName(channel: com.discord.api.channel.Channel): String {
+        return try {
+            val field = com.discord.api.channel.Channel::class.java.getDeclaredField("name")
+            field.isAccessible = true
+            field.get(channel).toRealString()
+        } catch (e: Throwable) {
+            ""
         }
     }
 }
