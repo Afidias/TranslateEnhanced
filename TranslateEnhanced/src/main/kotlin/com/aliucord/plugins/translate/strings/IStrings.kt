@@ -84,6 +84,13 @@ interface IStrings {
     val channelConfigTitle: String
     val channelConfigPromptHint: String
     val channelConfigGlossaryHint: String
+    val channelConfigPromptSection: String
+    val channelConfigGlossarySection: String
+    val channelConfigGlossaryDescription: String
+    val channelConfigTermSource: String
+    val channelConfigTermTarget: String
+    val channelConfigAddTerm: String
+    val channelConfigActionsSection: String
     val channelConfigGenerate: String
     val channelConfigSave: String
     val channelConfigClear: String
