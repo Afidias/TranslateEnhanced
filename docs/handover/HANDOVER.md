@@ -1,9 +1,17 @@
 # TranslateEnhanced 交接文档（Handover）
 
 > 适用对象：准备接手维护 / 二次开发本插件的人
-> 最后更新：2026-08-03（对应代码 `6331a41`）
+> 最后更新：2026-08-06（对应代码 `588fb32`）
 > 插件仓库：`https://github.com/kizfive/TranslateEnhanced`
 > 安装包：`https://github.com/kizfive/TranslateEnhanced/raw/builds/TranslateEnhanced.zip`
+
+## 当前发布状态
+
+- `test` 已在 2026-08-06 经设备实测确认无问题，并快进合并到 `main`。
+- 当前正式代码：`588fb32`；正式 CI：`31077546295`，编译、Artifacts 上传和 `builds` 发布全部成功。
+- 当前 `builds` 提交：`e9cc204`（`Build 588fb3266a515cbba650c94a6d6ece4c235a0da0`）。
+- 后续功能开发仍建议先进入 `test`，通过 CI 和设备实测后再合并 `main`。
+- `HANDOVER_2026-08-03.md` 是当日开发过程快照，仅用于追溯；项目当前状态以本文为准。
 
 ---
 
@@ -53,7 +61,10 @@ TranslateEnhanced/
 ├── .github/workflows/build.yml        # CI：构建并推送到 builds 分支
 ├── build.gradle.kts                   # 根构建脚本（定义 aliucord/android 扩展、依赖）
 ├── settings.gradle.kts
-├── README.md                          # 简短用户向说明
+├── README.md                          # 面向普通用户的安装、配置与使用说明
+├── docs/handover/
+│   ├── HANDOVER.md                    # 当前维护者交接文档（本文件）
+│   └── HANDOVER_2026-08-03.md         # 2026-08-03 历史开发快照
 ├── .gitignore
 └── TranslateEnhanced/
     └── src/main/
@@ -66,6 +77,12 @@ TranslateEnhanced/
             ├── TextCleaner.kt               # 翻译前清理 HTML/URL/Emoji（全部占位符化，译文后统一还原）
             ├── TranslateController.kt       # 调度中心：选后端、缓存、线程池、降级
             ├── PluginSettings.kt            # 设置页 UI
+            ├── ChannelConfig.kt              # 频道提示词/术语表存储
+            ├── ChannelConfigsPage.kt         # 频道配置列表页
+            ├── ChannelConfigPage.kt          # 单频道配置与术语表页面
+            ├── ChannelConfigUi.kt            # 页面跳转与 LLM 自动生成逻辑
+            ├── ChannelDisplayInfo.kt         # 频道名称、头像和所属服务器解析
+            ├── TranslationCache.kt           # 持久化翻译缓存
             ├── auto/
             │   ├── AutoTranslateManager.kt   # 按频道开关 + 失败暂停
             │   └── LanguageDetector.kt       # 启发式语言检测（区分简繁）
@@ -145,7 +162,7 @@ TranslateEnhanced/
 ### 4.2 `TranslateController.kt`（调度中心）
 - `translateSync()`：所有防御转换都先 `toRealString()`；空译文/异常视为失败；LLM 失败自动回退 Google 并在主线程 Toast 提示。
 - **自动翻译批量合并**：`enqueueAutoTranslate()` 把待翻译消息放进队列，延迟 1s 后由单线程调度器 flush（每次最多 10 条、单条 ≤1500 字符，超限走单条）；LLM 后端合并为一次请求，Google 后端逐条。`finalizeAutoItem()` 统一还原占位符/链接、降级 Google、缓存、刷新、记录成功/失败并释放 pending。手动翻译不走批量，保持即时。
-- **频道级翻译配置**：`ChannelConfig` 按 `channelPrompt_{channelId}` / `channelGlossary_{channelId}` 存储专属提示词和术语表（每行 `原词=译文`），`channelConfigChannels` 维护频道登记表；`resolveBackend(force, channelId)` 注入 LLM prompt。管理入口统一在**设置子页面 `ChannelConfigsPage`**（设置页"频道配置"进入，频道 = 登记表 ∪ 缓存频道），消息菜单"频道翻译配置"直接打开对应频道的编辑对话框。可手改、可**自动生成**（`ChannelConfigUi` + `LLMTranslator.complete()` 分析最近 30 条消息输出 `PROMPT|...` / `TERM|原词=译文`，**生成后自动保存**），也可清除本频道缓存/配置。
+- **频道级翻译配置**：`ChannelConfig` 按 `channelPrompt_{channelId}` / `channelGlossary_{channelId}` 存储专属提示词和术语表（持久化格式仍为每行 `原词=译文`），`channelConfigChannels` 维护频道登记表；`resolveBackend(force, channelId)` 注入 LLM prompt。设置中的 `ChannelConfigsPage` 显示服务器头像/频道名、私聊头像/用户名或群聊头像/名称，点击后进入独立的 `ChannelConfigPage`。该页面提供提示词输入和可逐行增删的“原术语 / 指定译法”两列表格。消息菜单入口也统一跳转到该页面。可手改、可**自动生成**（`ChannelConfigUi` + `LLMTranslator.complete()` 分析最近 30 条已加载消息，输出 `PROMPT|...` / `TERM|原词=译文` 并自动保存），也可清除本频道缓存/配置。
 - **持久化翻译缓存**：`TranslationCache` 写 `/sdcard/Aliucord/translate_cache.json`（上限 1000 条，sourceText 校验防失效）；translateSync/批量命中直接返回不请求后端，成功时写缓存，批量结束/手动翻译/插件停止时 flush。设置页"翻译缓存"可清全部，频道配置对话框可清本频道。
 - **自动翻译进度 toast**：批量开始/请求后端/本批完成三个阶段都有 toast，`showAutoToast()` 限频（默认 2.5s 间隔），避免历史批量翻译时刷屏；**降级 Google 不再逐条弹 toast**，降级条数汇总进"本批完成"提示（如"本批 10 条翻译完成（3 条降级 Google）"）。
 - **内容还原**：`TextCleaner.clean()` 把 emoji/Discord 标记（提及、自定义表情、时间戳、HTML）替换为 `[[EMOJI_n]]` / `[[TAG_n]]` 占位符，翻译成功后由 `TextCleaner.restoreAll()` 统一还原；若翻译引擎吞掉占位符，缺失内容会追加到译文末尾，保证不丢。
@@ -300,7 +317,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 - 本地：`./gradlew :TranslateEnhanced:make generateUpdaterJson`
 - 自动：push `main` → GitHub Actions 构建 → 产物推到 `builds` 分支（`TranslateEnhanced.zip` + `updater.json`）。
 - 用户侧更新源：`builds/updater.json`（在 `build.gradle.kts` 的 `updateUrl`/`buildUrl` 配置）。
-- **插件描述**：zip 内 `plugin.json` 的 `description` 来自 Gradle 项目的 `description` 属性（Aliucord gradle 插件 `Tasks.kt` 生成 manifest 时取 `project.description`）。目前仓库没有设置，在 `TranslateEnhanced/build.gradle.kts`（子项目脚本）里加 `description = "..."` 即可。
+- **插件描述**：zip 内 `plugin.json` 的 `description` 来自 Gradle 项目的 `description` 属性（Aliucord gradle 插件 `Tasks.kt` 生成 manifest 时取 `project.description`）。目前仓库仍未设置；如需添加，在 `TranslateEnhanced/build.gradle.kts`（子项目脚本）里写 `description = "..."`。
 
 ---
 
@@ -334,6 +351,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 
 ## 11. 已知问题 / TODO
 
+- 频道显示信息来自 Discord 当前内存 Store：服务器频道使用所属服务器头像，单人私聊使用对方头像，群聊使用频道头像；Discord 126021 的 `Channel.name` 是私有字段，`ChannelDisplayResolver` 通过反射读取。若旧频道未加载进 Store，会安全回退显示频道 ID。
 - "译文和原文相同（原样返回）"问题：根因未定（可能是模型回显、温度 0、或文本本就在目标语言）。目前已有两个兜底手段：消息菜单"重新翻译"（强制重翻 + 防回显提示）和译文与原文相同时的 WARNING 日志。若需彻底定位，让用户开 Debug Mode 回传 `translate.log`。
 - 历史消息翻译依赖消息被渲染（滚动到可见）才会触发；译文缓存 LRU 上限 300 条，长历史大幅滚动后旧译文可能被淘汰并触发重新翻译（涉及 API 配额，暂未做持久化去重）。
 - **译文渲染依赖 Discord 内部 API**：`buildTranslatedBuilder()` 用 `DiscordParser.parseChannelMessage` + 反射调用 `WidgetChatListAdapterItemMessage` 的 `getMessageRenderContext/getMessagePreprocessor/getSpoilerClickHandler` 重渲染译文（URL 可点击、emoji/提及/时间戳原生显示）；Discord 升级改签名时自动回退纯文本显示。
@@ -349,6 +367,7 @@ java.lang.ClassCastException: d0.d0.b cannot be cast to kotlin.collections.IntIt
 
 ## 12. 快速上手 checklist
 
+- [ ] 先读根目录面向用户的 `README.md`，再读本交接文档。
 - [ ] 装好 JDK 17 + Android SDK（compileSdk 31）。
 - [ ] 能本地 `./gradlew :TranslateEnhanced:make` 出包。
 - [ ] 读完第 6 节（R8 / `d0.d0.b`），这是本项目最容易再踩的坑。
