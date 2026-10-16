@@ -340,9 +340,13 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         onToggle: ((Boolean) -> Unit)? = null
     ): CheckedSetting =
         Utils.createCheckedSetting(ctx, CheckedSetting.ViewType.SWITCH, label, subtext).apply {
-            isChecked = settings.getBool(key, default)
+            // ConfigStore 优先：用户在 /sdcard/Aliucord/TranslateEnhanced.config.json
+            // 里手改布尔项也能立刻生效
+            isChecked = if (ConfigStore.has(key)) ConfigStore.getBool(key, default)
+            else settings.getBool(key, default)
             setOnCheckedListener { v ->
-                settings.setBool(key, v)
+                ConfigStore.put(key, v)   // 写入插件自有配置
+                settings.setBool(key, v)  // 同步 Aliucord settings 保持兼容
                 onToggle?.invoke(v)
             }
         }

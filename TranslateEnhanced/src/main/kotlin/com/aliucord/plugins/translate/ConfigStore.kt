@@ -131,6 +131,40 @@ object ConfigStore {
             // 首次创建配置文件时，尝试从 Aliucord settings 目录迁移用户已有配置
             // （包括用户手改过的 .bak），避免要求用户重新填写 API Key。
             if (!existedBefore) tryImportLegacy()
+            // 每次启动都做一次轻量自愈，修正"占位符与真实值并存"的历史遗留
+            reconcileCoreKeys()
+        }
+    }
+
+    /**
+     * 自愈：让每个核心字段在**所有别名**下取值一致。
+     *
+     * 场景：首次迁移时 `llmApiKey` 写入了内置占位符，而用户的真实 Key 落在
+     * 旧别名 `apiKey` 下。读取逻辑虽已能跳过占位符，但配置文件本身会自相矛盾，
+     * 用户查看/手改时容易困惑。这里在启动时把它们统一成真实值。
+     *
+     * 只在确实挑出真实值时才回写；若整个字段只有占位符则原样保留。
+     */
+    private fun reconcileCoreKeys() {
+        val target = cached ?: return
+        var changed = false
+        try {
+            for (key in CORE_CONFIG_KEYS) {
+                val real = pickRealValue(target, key) ?: continue
+                for (name in aliasesFor(key)) {
+                    val cur = target.optString(name, "")
+                    if (cur != real) {
+                        target.put(name, real)
+                        changed = true
+                    }
+                }
+            }
+            if (changed) {
+                writeLocked(target)
+                DebugLogger.log("ConfigStore: reconciled core keys across aliases")
+            }
+        } catch (e: Exception) {
+            DebugLogger.log("ConfigStore: reconcile failed: ${e.message}")
         }
     }
 
@@ -139,22 +173,109 @@ object ConfigStore {
     private const val LEGACY_NAME = "TranslateEnhanced.json"
 
     /**
-     * 从 Aliucord 的 settings 目录导入用户已有配置。
+     * 从 Aliucord settings 目录导入用户已有配置。
      *
-     * 只在插件自有 config.json **首次创建**时执行一次。
+     * 只在插件自有配置文件**首次创建**时执行一次。
      *
-     * 读取顺序：`.bak` 优先（用户手改后往往被 Aliucord 备份到这里），再读正式文件。
-     * 这些路径在 Android 11+ 上可能因分区存储不可读，读不到就静默跳过——
-     * 不会清空任何东西，也不会影响新建的默认配置。
+     * 顺序：`.bak` 优先（用户手改后往往被 Aliucord 备份到这里），再读正式文件。
+     *
+     * ## 为什么是"字段级"而不是"整体合并"
+     *
+     * 首次创建时文件里已经写了一份内置默认值（例如 `llmApiKey` = 占位符）。
+     * 如果只是把旧文件的 key 一个个塞进来，`apiKey`（用户的真实 Key）会与
+     * `llmApiKey`（占位符）并存 —— 而别名查找先命中 `llmApiKey`，
+     * 用户真实 Key 就被占位符挡住了。
+     *
+     * 所以对四个核心字段先做**按别名优先级挑选真实值**，再把该值写进
+     * 全部别名，最后才补齐其余缺省项。
      */
     private fun tryImportLegacy() {
+        val target = cached ?: return
+        val legacy = readLegacyJson()
+
+        var imported = 0
+        if (legacy != null) {
+            // ① 四个核心字段：按别名优先级挑出"真实值"，写进所有别名
+            for (key in CORE_CONFIG_KEYS) {
+                val picked = pickRealValue(legacy, key)
+                if (picked != null) {
+                    for (name in aliasesFor(key)) target.put(name, picked)
+                    imported++
+                    DebugLogger.log("ConfigStore: migrated $key = $picked")
+                }
+            }
+
+            // ② 其余 key（频道配置、自动翻译开关等）直接合并，跳过已处理的别名
+            val keys = legacy.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                if (ALL_ALIAS_NAMES.contains(k)) continue
+                val incoming = legacy.opt(k) ?: continue
+                if (incoming == JSONObject.NULL) continue
+                if (incoming is String && incoming.isEmpty()) continue
+                target.put(k, incoming)
+                imported++
+            }
+        }
+
+        // ③ 最后补齐仍然缺失的内置默认值（DeepSeek 等）
+        fillDefaults(target)
+        writeLocked(target)
+
+        if (imported > 0) {
+            DebugLogger.warn("ConfigStore: migrated $imported legacy keys into ${configFile?.name}")
+        } else {
+            DebugLogger.log("ConfigStore: no legacy config to import, seeded defaults")
+        }
+    }
+
+    /** 需要做别名优先级挑选的核心字段。 */
+    private val CORE_CONFIG_KEYS = listOf(
+        SETTINGS_KEY_BACKEND,
+        SETTINGS_KEY_LLM_BASE_URL,
+        SETTINGS_KEY_LLM_API_KEY,
+        SETTINGS_KEY_LLM_MODEL
+    )
+
+    /** 所有别名名（含正式 key），用于跳过已处理的项。 */
+    private val ALL_ALIAS_NAMES: Set<String> =
+        CORE_CONFIG_KEYS.flatMap { aliasesFor(it) }.toSet()
+
+    /**
+     * 判断一个值是否是"未填写的占位符"。
+     * 占位符不应挡住同一个字段在另一个别名下的真实值。
+     */
+    private fun isPlaceholder(v: String): Boolean =
+        v.isEmpty() || v == DEFAULT_API_KEY || v.contains("你的DeepSeek密钥")
+
+    /**
+     * 在一个 JSON 对象里，按别名优先级挑出该字段的"真实值"。
+     * 跳过空值、JSON null 与占位符；找不到返回 null。
+     */
+    private fun pickRealValue(obj: JSONObject, key: String): String? {
+        for (name in aliasesFor(key)) {
+            try {
+                val v = obj.optString(name, "")
+                if (v.isEmpty() || v == "null") continue
+                if (isPlaceholder(v)) continue
+                return if (key == SETTINGS_KEY_BACKEND) normalizeBackend(v) else v
+            } catch (e: Exception) {
+                // 换下一个别名
+            }
+        }
+        return null
+    }
+
+    /**
+     * 读取遗留配置：
+     * `.bak` 优先（用户手改后 Aliucord 往往把原文件备份到这里），再读正式文件。
+     * 读不到或解析失败都返回 null，不影响任何已有数据。
+     */
+    private fun readLegacyJson(): JSONObject? {
         val candidates = listOf(
             File(LEGACY_SETTINGS_DIR, "$LEGACY_NAME.bak"),
             File(LEGACY_SETTINGS_DIR, LEGACY_NAME)
         )
-        val target = cached ?: return
-        var imported = 0
-
         for (src in candidates) {
             try {
                 if (!src.exists() || !src.canRead()) {
@@ -163,37 +284,14 @@ object ConfigStore {
                 }
                 val text = src.readText(Charsets.UTF_8)
                 if (safeIsBlank(text)) continue
-
                 val obj = JSONObject(text)
-                val keys = obj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    // 已有非默认值的 key 不覆盖，其余从遗留配置补齐
-                    val incoming = obj.opt(k) ?: continue
-                    if (incoming == JSONObject.NULL) continue
-                    if (incoming is String && incoming.isEmpty()) continue
-                    target.put(k, incoming)
-                    imported++
-                }
-                DebugLogger.log("ConfigStore: imported $imported keys from ${src.name}")
-                // 只认第一个可读的来源，避免后读的覆盖先读的
-                if (imported > 0) break
+                DebugLogger.log("ConfigStore: legacy source = ${src.name} (${obj.length()} keys)")
+                return obj
             } catch (e: Exception) {
-                DebugLogger.log("ConfigStore: legacy import failed (${src.name}): ${e.message}")
+                DebugLogger.log("ConfigStore: legacy read failed (${src.name}): ${e.message}")
             }
         }
-
-        if (imported > 0) {
-            // 迁移完再补齐缺失的内置默认值（DeepSeek 等），保证首次加载即可用
-            fillDefaults(target)
-            writeLocked(target)
-            DebugLogger.warn("ConfigStore: migrated $imported legacy keys into ${configFile?.name}")
-        } else {
-            // 没有任何可迁移的旧配置：补上内置默认值（DeepSeek）后落盘
-            fillDefaults(target)
-            writeLocked(target)
-            DebugLogger.log("ConfigStore: no legacy config to import, seeded defaults")
-        }
+        return null
     }
 
     /** 把内置默认值补进 obj（只补缺失的 key，不覆盖已有值）。 */
@@ -346,18 +444,26 @@ object ConfigStore {
     fun getString(key: String, fallback: String): String {
         synchronized(lock) {
             val obj = cached ?: return fallback
+            // 记录遇到的第一处占位符：若整串别名都只有占位符，用它（让 UI 提示用户填写）
+            var placeholderHit: String? = null
             for (name in aliasesFor(key)) {
                 try {
                     if (!obj.has(name)) continue
                     val v = obj.optString(name, "")
                     // optString 对 JSON null 会返回 "null"，显式挡掉
                     if (v == "null" || v.isEmpty()) continue
+                    // 占位符记下但继续找：避免 "sk-你的DeepSeek密钥" 挡住
+                    // 同一字段在旧别名（如 apiKey）下的真实 Key
+                    if (isPlaceholder(v)) {
+                        if (placeholderHit == null) placeholderHit = v
+                        continue
+                    }
                     return if (key == SETTINGS_KEY_BACKEND) normalizeBackend(v) else v
                 } catch (e: Exception) {
                     // 换下一个别名继续
                 }
             }
-            return fallback
+            return placeholderHit ?: fallback
         }
     }
 

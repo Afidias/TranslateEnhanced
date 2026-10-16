@@ -68,11 +68,22 @@ class Translate : Plugin() {
         // 并在首次创建时尝试从 Aliucord settings 目录迁移已有配置。
         // 注意：只在文件确实不存在时才写入默认值，绝不会覆盖已有配置。
         ConfigStore.init(ctx)
+
+        // debug 开关优先取 ConfigStore（这样用户手改配置文件里的 debugMode 也生效），
+        // 再回落 Aliucord settings。必须在 ConfigStore.init 之后、其它初始化之前执行，
+        // 否则 ConfigStore 自身的诊断日志会因 enabled=false 而写不进文件。
+        val debugOn = if (ConfigStore.has(SETTINGS_KEY_DEBUG_MODE))
+            ConfigStore.getBool(SETTINGS_KEY_DEBUG_MODE, false)
+        else
+            settings.getBool(SETTINGS_KEY_DEBUG_MODE, false)
+        DebugLogger.setEnabled(debugOn)
+
         DebugLogger.log("ConfigStore ready: ${ConfigStore.filePath()}")
         DebugLogger.log("Log file: ${DebugLogger.currentPath()}")
+        DebugLogger.log("Debug mode: $debugOn")
 
         // 把兼容读取到的新 key 值回写到 Aliucord SettingsAPI，
-        // 让仍走 settings 的旧代码路径（TranslateController 等）也能拿到正确值
+        // 让仍走 settings 的旧代码路径（AutoTranslateManager / ChannelConfig 等）也能拿到正确值
         migrateConfigToSettings()
 
         controller = TranslateController(
@@ -94,8 +105,6 @@ class Translate : Plugin() {
         )
         autoManager = AutoTranslateManager(settings)
 
-        // 初始化 debug 模式
-        DebugLogger.setEnabled(settings.getBool(SETTINGS_KEY_DEBUG_MODE, false))
         DebugLogger.log("Plugin loaded. Debug mode: ${DebugLogger.isEnabled()}")
     }
 
@@ -109,21 +118,32 @@ class Translate : Plugin() {
     /**
      * 把 ConfigStore 里的配置同步进 Aliucord SettingsAPI。
      *
-     * ConfigStore 是权威来源（它读的是插件自有 config.json，兼容旧 key），
-     * 但 TranslateController / DebugLogger 等仍是走 `settings.getString(...)`，
-     * 所以启动时把值灌过去，保证两边一致。
+     * ConfigStore 是权威来源（它读的是插件自有配置文件，兼容旧 key），
+     * 但 AutoTranslateManager / ChannelConfig / TranslationCache 等模块仍走
+     * `settings.getString/getBool(...)`，所以启动时把值灌过去保证两边一致。
      *
      * 只覆盖"ConfigStore 明确有值"的 key，不会把 SettingsAPI 里已有的值抹掉。
      */
     private fun migrateConfigToSettings() {
+        // 字符串配置
         syncKey(SETTINGS_KEY_BACKEND)
         syncKey(SETTINGS_KEY_LLM_BASE_URL)
         syncKey(SETTINGS_KEY_LLM_API_KEY)
         syncKey(SETTINGS_KEY_LLM_MODEL)
+        syncKey(SETTINGS_KEY_DEFAULT_LANG)
+
+        // 布尔配置
+        syncBool(SETTINGS_KEY_DEBUG_MODE, false)
+        syncBool(SETTINGS_KEY_CLEAN_HTML, true)
+        syncBool(SETTINGS_KEY_CLEAN_URL, false)
+        syncBool(SETTINGS_KEY_CLEAN_EMOJI, true)
+        syncBool(SETTINGS_KEY_AUTO_TRANSLATE_SELF, false)
+
         DebugLogger.log(
             "config synced: backend=${ConfigStore.getString(SETTINGS_KEY_BACKEND, ConfigStore.DEFAULT_BACKEND)} " +
                 "model=${ConfigStore.getString(SETTINGS_KEY_LLM_MODEL, ConfigStore.DEFAULT_MODEL)} " +
-                "baseUrl=${ConfigStore.getString(SETTINGS_KEY_LLM_BASE_URL, ConfigStore.DEFAULT_BASE_URL)}"
+                "baseUrl=${ConfigStore.getString(SETTINGS_KEY_LLM_BASE_URL, ConfigStore.DEFAULT_BASE_URL)} " +
+                "apiKey=${if (ConfigStore.getString(SETTINGS_KEY_LLM_API_KEY, "").length > 8) "set" else "empty"}"
         )
     }
 
@@ -135,6 +155,15 @@ class Translate : Plugin() {
             settings.setString(key, v)
         } catch (e: Exception) {
             DebugLogger.log("syncKey $key failed: ${e.message}")
+        }
+    }
+
+    private fun syncBool(key: String, default: Boolean) {
+        try {
+            if (!ConfigStore.has(key)) return
+            settings.setBool(key, ConfigStore.getBool(key, default))
+        } catch (e: Exception) {
+            DebugLogger.log("syncBool $key failed: ${e.message}")
         }
     }
 
