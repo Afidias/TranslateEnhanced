@@ -62,22 +62,34 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             ctx, CheckedSetting.ViewType.RADIO, strings.settingsBackendLLM, null
         )
 
+        // 防止 refreshBackend() 程序化设置 isChecked 时递归触发监听器
+        var suppressBackendCallback = false
+
         fun refreshBackend() {
-            val current = safeGetStr(SETTINGS_KEY_BACKEND, "google")
+            val current = safeGetStr(SETTINGS_KEY_BACKEND, ConfigStore.DEFAULT_BACKEND)
+            suppressBackendCallback = true
             googleRow.isChecked = current == "google"
             llmRow.isChecked = current == "llm"
+            suppressBackendCallback = false
             llmSection.visibility = if (current == "llm") View.VISIBLE else View.GONE
         }
 
-        googleRow.setOnClickListener {
-            if (!googleRow.isChecked) {
-                settings.setString(SETTINGS_KEY_BACKEND, "google")
+        // ⚠️ 不要用 setOnClickListener + if(!isChecked) 判断：
+        // Discord 的 CheckedSetting 在 RADIO 模式下点击时会先自行把 isChecked 置为 true，
+        // 导致 `if (!row.isChecked)` 恒为 false，回调体永不执行、设置永远写不进去，
+        // 表现为"两个选项都无法选中 / 大模型配置区不出现"。
+        // 正确做法是用 setOnCheckedListener（与 switchRow 一致），它只在用户点击时回调。
+        googleRow.setOnCheckedListener { checked ->
+            if (suppressBackendCallback) return@setOnCheckedListener
+            if (checked) {
+                putStr(SETTINGS_KEY_BACKEND, "google")
                 refreshBackend()
             }
         }
-        llmRow.setOnClickListener {
-            if (!llmRow.isChecked) {
-                settings.setString(SETTINGS_KEY_BACKEND, "llm")
+        llmRow.setOnCheckedListener { checked ->
+            if (suppressBackendCallback) return@setOnCheckedListener
+            if (checked) {
+                putStr(SETTINGS_KEY_BACKEND, "llm")
                 refreshBackend()
             }
         }
@@ -131,11 +143,14 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         addHeader(ctx, strings.settingsSectionDebug)
         addView(switchRow(ctx, strings.settingsDebugMode, SETTINGS_KEY_DEBUG_MODE, false) { v ->
             DebugLogger.setEnabled(v)
-            Utils.showToast(if (v) strings.settingsDebugOn + LOG_PATH else strings.settingsDebugOff)
+            Utils.showToast(
+                if (v) strings.settingsDebugOn + DebugLogger.currentPath() else strings.settingsDebugOff
+            )
         })
         addView(TextView(ctx, null, 0, R.i.UiKit_Settings_Item_Icon).apply {
-            text = strings.settingsDebugLogPath
-            setOnClickListener { Utils.showToast(strings.settingsDebugLogPath) }
+            // 显示真实日志路径（Android 11+ 下可能落在应用私有目录）
+            text = DebugLogger.currentPath()
+            setOnClickListener { Utils.showToast(DebugLogger.currentPath()) }
         })
         addView(fullButton(ctx, strings.settingsDebugClearLog) {
             DebugLogger.clearLog()
@@ -146,9 +161,32 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         refreshLangRow(langRow, strings)
     }
 
-    /** 安全读取 String 设置项（使用扩展函数 safeGetString） */
-    private fun safeGetStr(key: String, default: String = ""): String =
-        settings.safeGetString(key, default)
+    /**
+     * 安全读取 String 设置项。
+     *
+     * 优先读 ConfigStore（插件自有文件，用户手改立即生效）；
+     * ConfigStore 没有该 key 时回落到 Aliucord SettingsAPI。
+     */
+    private fun safeGetStr(key: String, default: String = ""): String {
+        if (ConfigStore.has(key)) {
+            val v = ConfigStore.getString(key, default)
+            if (!v.isEmpty()) return v
+        }
+        return settings.safeGetString(key, default)
+    }
+
+    /**
+     * 写配置：同时写 ConfigStore（插件自有文件，不会被 Aliucord 覆盖）
+     * 和 SettingsAPI（保持兼容，供其余代码 path 读取）。
+     */
+    private fun putStr(key: String, value: String) {
+        ConfigStore.put(key, value)
+        try {
+            settings.setString(key, value)
+        } catch (e: Exception) {
+            DebugLogger.log("putStr settings failed: ${e.message}")
+        }
+    }
 
     /**
      * 测试 LLM 连接
@@ -215,14 +253,14 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
     /** 显示模型选择对话框 */
     private fun showModelSelectionDialog(models: List<String>, strings: IStrings) {
         try {
-            val ctx = requireContext()
+            val ctx = dialogContext()
             val currentModel = safeGetStr(SETTINGS_KEY_LLM_MODEL)
 
             MaterialAlertDialogBuilder(ctx)
                 .setTitle(strings.settingsSelectModel)
                 .setItems(models.toTypedArray()) { _, which ->
                     val selectedModel = models[which]
-                    settings.setString(SETTINGS_KEY_LLM_MODEL, selectedModel)
+                    putStr(SETTINGS_KEY_LLM_MODEL, selectedModel)
                     Utils.showToast(strings.settingsModelSet + selectedModel)
                     // 直接更新模型输入框，无需重建页面
                     modelInput?.setText(selectedModel)
@@ -234,10 +272,30 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
         }
     }
 
+    /**
+     * 取用于弹窗的 Context。
+     *
+     * Android 15 上直接拿 Activity 的 Context 建 MaterialAlertDialog 可能因为主题
+     * 无法解析 Material 属性而抛 IllegalStateException（设置页 Theme 继承自 Discord，
+     * 不保证带 Material 的 dialogTheme）。这里用 appcompat 的 ContextThemeWrapper
+     * 包一层，确保属性可解析。
+     */
+    private fun dialogContext(): Context {
+        val base = requireContext()
+        return try {
+            androidx.appcompat.view.ContextThemeWrapper(
+                base, com.google.android.material.R.style.Theme_MaterialComponents_DayNight_Dialog_Alert
+            )
+        } catch (e: Exception) {
+            // 主题资源不存在时退回原 Context，由外层 try-catch 兜底
+            base
+        }
+    }
+
     /** 显示目标语言选择对话框（单选框列表） */
     private fun showLanguagePicker(strings: IStrings, langRow: TextView? = null) {
         try {
-            val ctx = requireContext()
+            val ctx = dialogContext()
             val names = languageCodes.keys.toTypedArray()
             val currentCode = safeGetStr(SETTINGS_KEY_DEFAULT_LANG, DEFAULT_TARGET_LANG)
             val currentIndex = languageCodes.values.indexOf(currentCode)
@@ -246,7 +304,7 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                 .setTitle(strings.settingsDefaultLanguage)
                 .setSingleChoiceItems(names, currentIndex) { dialog, which ->
                     val code = languageCodes.values.elementAt(which)
-                    settings.setString(SETTINGS_KEY_DEFAULT_LANG, code)
+                    putStr(SETTINGS_KEY_DEFAULT_LANG, code)
                     Utils.showToast(strings.settingsLanguageSaved)
                     dialog.dismiss()
                     refreshLangRow(langRow, strings)
@@ -304,6 +362,8 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
             setDefaultHintTextColor(ColorStateList.valueOf(ColorCompat.getThemedColor(ctx, R.b.colorHeaderSecondary)))
             this.hint = hint
             addView(TextInputEditText(ctx).apply {
+                // safeGetStr 走反射 toString，返回的是真 String；
+                // 直接 setText 混淆类型会在 Android 15 的文本渲染路径上崩溃
                 setText(safeGetStr(key))
                 setTextColor(ColorCompat.getThemedColor(ctx, R.b.colorHeaderPrimary))
                 setHintTextColor(ColorStateList.valueOf(ColorCompat.getThemedColor(ctx, R.b.colorHeaderSecondary)))
@@ -313,7 +373,8 @@ class PluginSettings(private val settings: SettingsAPI) : SettingsPage() {
                 }
                 setOnFocusChangeListener { _, hasFocus ->
                     if (!hasFocus) {
-                        settings.setString(key, text.toString())
+                        // text 可能为 null；toString() 在 EditText 的真 String 上安全
+                        putStr(key, text?.toString() ?: "")
                     }
                 }
             })

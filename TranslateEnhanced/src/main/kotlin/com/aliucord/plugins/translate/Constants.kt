@@ -23,3 +23,19 @@ internal const val SETTINGS_KEY_AUTO_TRANSLATE_SELF = "autoTranslateSelf"
 internal const val CMD_NAME = "translate"
 
 internal const val LOG_PATH = "/sdcard/Aliucord/translate.log"
+
+/**
+ * 旧版配置 key 别名（用户早期手写 TranslateEnhanced.json 时使用的名字）。
+ *
+ * 这组名字与源码实际使用的 key 不一致，曾导致"用户写的配置读不到、
+ * 保存时又被整体覆盖"的问题。ConfigStore 会同时识别两套名字。
+ */
+internal const val SETTINGS_KEY_BACKEND_ALIAS        = "translationBackend"
+internal const val SETTINGS_KEY_LLM_BASE_URL_ALIAS   = "baseUrl"
+internal const val SETTINGS_KEY_LLM_API_KEY_ALIAS    = "apiKey"
+internal const val SETTINGS_KEY_LLM_MODEL_ALIAS      = "model"
+
+/** 后端取值别名：旧配置里的 "openai" 等价于 "llm"。 */
+internal const val BACKEND_VALUE_OPENAI = "openai"
+internal const val BACKEND_VALUE_LLM    = "llm"
+internal const val BACKEND_VALUE_GOOGLE = "google"

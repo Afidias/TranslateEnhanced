@@ -57,6 +57,24 @@ class Translate : Plugin() {
     override fun load(ctx: Context) {
         pluginIcon = ContextCompat.getDrawable(ctx, R.e.ic_locale_24dp)
         strings = ctx.getStrings()
+
+        // 日志先初始化：Android 11+ 上 /sdcard/Aliucord 可能不可写，
+        // DebugLogger 会切到应用私有目录（Android/data/<pkg>/files/translate.log），
+        // 保证后续所有初始化和崩溃日志都拿得到。
+        DebugLogger.init(ctx)
+
+        // 初始化独立配置存储（优先于一切配置读取）。
+        // 它会加载插件自有 config.json，兼容用户手改的旧 key 格式，
+        // 并在首次创建时尝试从 Aliucord settings 目录迁移已有配置。
+        // 注意：只在文件确实不存在时才写入默认值，绝不会覆盖已有配置。
+        ConfigStore.init(ctx)
+        DebugLogger.log("ConfigStore ready: ${ConfigStore.filePath()}")
+        DebugLogger.log("Log file: ${DebugLogger.currentPath()}")
+
+        // 把兼容读取到的新 key 值回写到 Aliucord SettingsAPI，
+        // 让仍走 settings 的旧代码路径（TranslateController 等）也能拿到正确值
+        migrateConfigToSettings()
+
         controller = TranslateController(
             settings,
             strings,
@@ -86,6 +104,38 @@ class Translate : Plugin() {
         patchProcessMessageText()
         patchMessageContextMenu()
         registerTranslateCommand()
+    }
+
+    /**
+     * 把 ConfigStore 里的配置同步进 Aliucord SettingsAPI。
+     *
+     * ConfigStore 是权威来源（它读的是插件自有 config.json，兼容旧 key），
+     * 但 TranslateController / DebugLogger 等仍是走 `settings.getString(...)`，
+     * 所以启动时把值灌过去，保证两边一致。
+     *
+     * 只覆盖"ConfigStore 明确有值"的 key，不会把 SettingsAPI 里已有的值抹掉。
+     */
+    private fun migrateConfigToSettings() {
+        syncKey(SETTINGS_KEY_BACKEND)
+        syncKey(SETTINGS_KEY_LLM_BASE_URL)
+        syncKey(SETTINGS_KEY_LLM_API_KEY)
+        syncKey(SETTINGS_KEY_LLM_MODEL)
+        DebugLogger.log(
+            "config synced: backend=${ConfigStore.getString(SETTINGS_KEY_BACKEND, ConfigStore.DEFAULT_BACKEND)} " +
+                "model=${ConfigStore.getString(SETTINGS_KEY_LLM_MODEL, ConfigStore.DEFAULT_MODEL)} " +
+                "baseUrl=${ConfigStore.getString(SETTINGS_KEY_LLM_BASE_URL, ConfigStore.DEFAULT_BASE_URL)}"
+        )
+    }
+
+    private fun syncKey(key: String) {
+        try {
+            if (!ConfigStore.has(key)) return
+            val v = ConfigStore.getString(key, "")
+            if (v.isEmpty()) return
+            settings.setString(key, v)
+        } catch (e: Exception) {
+            DebugLogger.log("syncKey $key failed: ${e.message}")
+        }
     }
 
     override fun stop(context: Context?) {

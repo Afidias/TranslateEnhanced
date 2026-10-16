@@ -596,18 +596,31 @@ class TranslateController(
 
     private fun resolveBackend(force: Boolean = false, channelId: Long? = null): TranslatorBackend {
         return try {
-            val choice = settings.safeGetString(SETTINGS_KEY_BACKEND, "google")
+            // 后端选择优先取 ConfigStore（兼容用户手改的旧 key，如 "openai"）
+            val choice = if (ConfigStore.has(SETTINGS_KEY_BACKEND))
+                ConfigStore.getString(SETTINGS_KEY_BACKEND, ConfigStore.DEFAULT_BACKEND)
+            else
+                settings.safeGetString(SETTINGS_KEY_BACKEND, ConfigStore.DEFAULT_BACKEND)
+
             if (choice == "llm") {
                 // 按频道注入专属提示词/术语表
                 val context = if (channelId != null) ChannelConfig.getPrompt(settings, channelId) else ""
                 val glossary = if (channelId != null) ChannelConfig.getGlossary(settings, channelId) else emptyList()
-                // 直接传 getString() 原始返回值给 LLMTranslator
-                // LLMTranslator 用 Any 接收 + String.format 转换，R8 无法优化
+
+                // 每个字段：ConfigStore（含旧 key 别名与内置 DeepSeek 默认值）优先，
+                // 缺失时回落 SettingsAPI，最后用内置默认值兜底，
+                // 保证大模型配置一定被填上，不会因为空值导致请求失败。
+                val baseUrl = cfgString(SETTINGS_KEY_LLM_BASE_URL, ConfigStore.DEFAULT_BASE_URL)
+                val apiKey  = cfgString(SETTINGS_KEY_LLM_API_KEY,  ConfigStore.DEFAULT_API_KEY)
+                val model   = cfgString(SETTINGS_KEY_LLM_MODEL,    ConfigStore.DEFAULT_MODEL)
+
+                // 传给 LLMTranslator 的构造参数是 Any，内部用 toRealString 转换。
+                // 这里的值已经是真 String，直接传即可。
                 LLMTranslator(
-                    baseUrl  = settings.getString(SETTINGS_KEY_LLM_BASE_URL, "") as Any,
-                    apiKey   = settings.getString(SETTINGS_KEY_LLM_API_KEY, "") as Any,
-                    model    = settings.getString(SETTINGS_KEY_LLM_MODEL, "gpt-4o-mini") as Any,
-                    systemPrompt = settings.getString(
+                    baseUrl  = baseUrl as Any,
+                    apiKey   = apiKey as Any,
+                    model    = model as Any,
+                    systemPrompt = cfgString(
                         SETTINGS_KEY_LLM_SYSTEM_PROMPT,
                         LLMTranslator.DEFAULT_SYSTEM_PROMPT
                     ) as Any,
@@ -621,6 +634,29 @@ class TranslateController(
         } catch (e: Exception) {
             DebugLogger.log("resolveBackend failed, falling back to Google: ${e.message}")
             GoogleTranslator()
+        }
+    }
+
+    /**
+     * 读 LLM 配置项：ConfigStore 优先（含旧 key 别名 + 内置默认值），
+     * 否则回落 SettingsAPI，最后用 [fallback]。
+     *
+     * 返回真 String，可安全用于字符串拼接与网络请求。
+     */
+    private fun cfgString(key: String, fallback: String): String {
+        try {
+            if (ConfigStore.has(key)) {
+                val v = ConfigStore.getString(key, fallback)
+                if (!safeIsBlank(v)) return v
+            }
+        } catch (e: Exception) {
+            DebugLogger.log("cfgString ConfigStore failed for $key: ${e.message}")
+        }
+        return try {
+            val v = settings.safeGetString(key, fallback)
+            if (safeIsBlank(v)) fallback else v
+        } catch (e: Exception) {
+            fallback
         }
     }
 

@@ -1,7 +1,21 @@
 import com.android.build.gradle.BaseExtension
 
+// 依赖仓库镜像：国内网络直连 dl.google.com / repo1.maven.org 不稳定，
+// 把阿里云镜像放在最前面可以显著加快首次构建。
+// 如果不需要，删掉这几行 aliyun 即可回退到官方源。
+fun org.gradle.api.artifacts.dsl.RepositoryHandler.mirrors() {
+    maven("https://maven.aliyun.com/repository/google")
+    maven("https://maven.aliyun.com/repository/central")
+    maven("https://maven.aliyun.com/repository/public")
+    maven("https://maven.aliyun.com/repository/gradle-plugin")
+}
+
 buildscript {
     repositories {
+        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/central")
+        maven("https://maven.aliyun.com/repository/public")
+        maven("https://maven.aliyun.com/repository/gradle-plugin")
         google()
         mavenCentral()
         maven("https://maven.aliucord.com/snapshots")
@@ -16,6 +30,7 @@ buildscript {
 
 allprojects {
     repositories {
+        mirrors()
         google()
         mavenCentral()
         maven("https://maven.aliucord.com/snapshots")
